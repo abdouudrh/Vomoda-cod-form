@@ -1,6 +1,6 @@
 client_id = "bf3d827cae133cc1b09c4147fa68ee37"
 name = "vomoda-cod-app-2"
-application_url = "https://YOUR-APP-URL"
+application_url = "https://vomoda-cod-form.onrender.com"
 embedded = true
 
 [build]
@@ -23,9 +23,9 @@ scopes = "read_orders,write_orders,write_products,write_metaobjects,write_metaob
 
 [auth]
 redirect_urls = [
-  "https://YOUR-APP-URL/api/auth",
-  "https://YOUR-APP-URL/auth/callback",
-  "https://YOUR-APP-URL/api/auth/callback"
+  "https://vomoda-cod-form.onrender.com/api/auth",
+  "https://vomoda-cod-form.onrender.com/auth/callback",
+  "https://vomoda-cod-form.onrender.com/api/auth/callback"
 ]
 
 [product.metafields.app.demo_info]
@@ -53,6 +53,6 @@ name = "Description"
 type = "multi_line_text_field"
 
 [app_proxy]
-url = "https://YOUR-APP-URL/apps/cod"
+url = "https://vomoda-cod-form.onrender.com/apps/cod"
 subpath = "cod"
 prefix = "apps"
