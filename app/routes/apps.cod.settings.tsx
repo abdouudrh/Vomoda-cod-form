@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { getMetaSettingsByShop } from "../models/meta-settings.server";
+import { getShippingSettingsByShop } from "../models/shipping-settings.server";
 import { authenticate } from "../shopify.server";
 
 function proxyJson(payload: Record<string, unknown>) {
@@ -19,13 +20,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       throw new Error("APP_PROXY_UNAUTHENTICATED");
     }
 
-    const settings = await getMetaSettingsByShop(session.shop);
+    const [metaSettings, shippingFees] = await Promise.all([
+      getMetaSettingsByShop(session.shop),
+      getShippingSettingsByShop(session.shop),
+    ]);
 
     return proxyJson({
       success: true,
       settings: {
-        metaEnabled: settings.metaEnabled,
-        metaPixelId: settings.metaPixelId,
+        metaEnabled: metaSettings.metaEnabled,
+        metaPixelId: metaSettings.metaPixelId,
+        shippingFees,
       },
     });
   } catch (error) {
@@ -36,6 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       settings: {
         metaEnabled: false,
         metaPixelId: "",
+        shippingFees: {},
       },
     });
   }

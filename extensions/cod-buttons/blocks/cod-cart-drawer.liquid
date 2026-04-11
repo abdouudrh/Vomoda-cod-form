@@ -185,67 +185,6 @@
   const COD_BUTTON_BACKGROUND = '#ff6a1a';
   const COD_BUTTON_TEXT = '#fff';
 
-  const SHIPPING_PRICES_DA = {
-    'adrar': 650,
-    'chlef': 320,
-    'laghouat': 580,
-    'oum el bouaghi': 430,
-    'batna': 470,
-    'bejaia': 360,
-    'biskra': 520,
-    'bechar': 740,
-    'blida': 240,
-    'bouira': 310,
-    'tamanrasset': 800,
-    'tebessa': 560,
-    'tlemcen': 420,
-    'tiaret': 450,
-    'tizi ouzou': 280,
-    'alger': 200,
-    'djelfa': 500,
-    'jijel': 340,
-    'setif': 390,
-    'saida': 460,
-    'skikda': 350,
-    'sidi bel abbes': 410,
-    'annaba': 370,
-    'guelma': 440,
-    'constantine': 380,
-    'medea': 330,
-    'mostaganem': 360,
-    'm sila': 490,
-    'mascara': 430,
-    'ouargla': 610,
-    'oran': 300,
-    'el bayadh': 570,
-    'illizi': 780,
-    'bordj bou arreridj': 400,
-    'boumerdes': 260,
-    'el tarf': 390,
-    'tindouf': 790,
-    'tissemsilt': 440,
-    'el oued': 540,
-    'khenchela': 500,
-    'souk ahras': 460,
-    'tipaza': 230,
-    'mila': 410,
-    'ain defla': 340,
-    'naama': 620,
-    'ain temouchent': 380,
-    'ghardaia': 590,
-    'relizane': 350,
-    'timimoun': 680,
-    'bordj badji mokhtar': 760,
-    'ouled djellal': 470,
-    'beni abbes': 620,
-    'in salah': 710,
-    'in guezzam': 790,
-    'touggourt': 530,
-    'djanet': 750,
-    'el meghaier': 480,
-    'el menia': 640
-  };
-
   function normalizeWilayaName(value) {
     return (value || '')
       .normalize('NFD')
@@ -256,30 +195,56 @@
       .toLowerCase();
   }
 
-  function getShippingPrice(wilaya) {
-    if (!wilaya) return null;
-    const key = normalizeWilayaName(wilaya);
-    return Object.prototype.hasOwnProperty.call(SHIPPING_PRICES_DA, key)
-      ? SHIPPING_PRICES_DA[key]
-      : null;
+  function emptyCodSettings() {
+    return {
+      metaEnabled: false,
+      metaPixelId: '',
+      shippingFees: {}
+    };
   }
 
-  function getShippingOptions(wilaya) {
-    const homePrice = getShippingPrice(wilaya);
-    if (homePrice === null) return [];
+  function normalizeOptionalShippingFee(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return null;
+    }
 
-    return [
-      {
+    return Number(value.toFixed(2));
+  }
+
+  function getShippingConfigForWilaya(shippingFees, wilaya) {
+    if (!shippingFees || !wilaya) return null;
+
+    const normalizedWilaya = normalizeWilayaName(wilaya);
+    const matchedKey = Object.keys(shippingFees).find(key => normalizeWilayaName(key) === normalizedWilaya);
+
+    return matchedKey ? shippingFees[matchedKey] : null;
+  }
+
+  function getShippingOptions(shippingFees, wilaya) {
+    const config = getShippingConfigForWilaya(shippingFees, wilaya);
+    if (!config) return [];
+
+    const options = [];
+    const homePrice = normalizeOptionalShippingFee(config.home);
+    const stopDeskPrice = normalizeOptionalShippingFee(config.stopDesk);
+
+    if (homePrice !== null) {
+      options.push({
         id: 'home',
         label: 'Livraison a domicile',
         price: homePrice
-      },
-      {
+      });
+    }
+
+    if (stopDeskPrice !== null) {
+      options.push({
         id: 'stop_desk',
         label: 'Stop desk',
-        price: Math.max(homePrice - 100, 0)
-      }
-    ];
+        price: stopDeskPrice
+      });
+    }
+
+    return options;
   }
 
   function getSelectedShippingMethod() {
@@ -352,31 +317,25 @@
               body: raw,
               error
             });
-            return {
-              metaEnabled: false,
-              metaPixelId: ''
-            };
+            return emptyCodSettings();
           }
 
           const settings = result?.success === true && result?.settings
             ? {
                 metaEnabled: Boolean(result.settings.metaEnabled),
-                metaPixelId: String(result.settings.metaPixelId || '').trim()
+                metaPixelId: String(result.settings.metaPixelId || '').trim(),
+                shippingFees: result.settings.shippingFees && typeof result.settings.shippingFees === 'object'
+                  ? result.settings.shippingFees
+                  : {}
               }
-            : {
-                metaEnabled: false,
-                metaPixelId: ''
-              };
+            : emptyCodSettings();
 
           window.__codMetaSettings = settings;
           return settings;
         })
         .catch(error => {
           console.error('[COD] Meta settings loading failed:', error);
-          return {
-            metaEnabled: false,
-            metaPixelId: ''
-          };
+          return emptyCodSettings();
         });
     }
 
@@ -1070,10 +1029,13 @@
         if (quantityLabel) quantityLabel.textContent = 'Qte';
       });
 
+      const settings = await getMetaSettings();
       const subtotal = cart.total_price / 100;
       const selectedWilaya = document.getElementById('cod-wilaya')?.value || '';
       const hasDeliveryLocation = hasSelectedDeliveryLocation();
-      const shippingOptions = hasDeliveryLocation ? getShippingOptions(selectedWilaya) : [];
+      const shippingOptions = hasDeliveryLocation
+        ? getShippingOptions(settings.shippingFees || {}, selectedWilaya)
+        : [];
       const selectedMethod = getSelectedShippingMethod();
       const activeShipping = shippingOptions.find(option => option.id === selectedMethod) || shippingOptions[0] || null;
       const grandTotal = activeShipping ? subtotal + activeShipping.price : null;
@@ -1089,7 +1051,7 @@
           </div>
         ` : !activeShipping ? `
           <div style="padding:10px 0 0;font-size:13px;color:#888;">
-            Choisissez un mode de livraison.
+            Desole, nous ne livrons pas a cette wilaya pour le moment.
           </div>
         ` : `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;font-size:14px;color:#666;">
@@ -1108,7 +1070,7 @@
     }
   }
 
-  function renderShippingMethods(preferredMethod = '') {
+  async function renderShippingMethods(preferredMethod = '') {
     const methodsEl = document.getElementById('cod-shipping-methods');
     const wilaya = document.getElementById('cod-wilaya')?.value || '';
     const city = document.getElementById('cod-city')?.value || '';
@@ -1120,17 +1082,22 @@
       return;
     }
 
-    const options = getShippingOptions(wilaya);
+    const settings = await getMetaSettings();
+    const options = getShippingOptions(settings.shippingFees || {}, wilaya);
     if (!options.length) {
-      methodsEl.innerHTML = '';
-      methodsEl.style.display = 'none';
+      methodsEl.innerHTML = `
+        <div style="padding:12px 14px;border:1px solid #fed7aa;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:14px;line-height:1.5;">
+          Desole, nous ne livrons pas a cette wilaya pour le moment.
+        </div>
+      `;
+      methodsEl.style.display = 'block';
       return;
     }
 
     const currentMethod = preferredMethod || getSelectedShippingMethod();
     const selectedMethod = options.some(option => option.id === currentMethod)
       ? currentMethod
-      : 'home';
+      : options[0].id;
 
     methodsEl.innerHTML = `
       <p style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.05em;margin:0 0 10px;">
@@ -1157,7 +1124,7 @@
 
     methodsEl.querySelectorAll('input[name="cod-shipping-method"]').forEach(input => {
       input.addEventListener('change', function () {
-        renderCart();
+        void renderCart();
       });
     });
   }
@@ -1342,13 +1309,13 @@
 
     document.getElementById('cod-wilaya').addEventListener('change', async function () {
       await renderCityOptions();
-      renderShippingMethods('home');
-      renderCart();
+      await renderShippingMethods('home');
+      await renderCart();
     });
 
-    document.getElementById('cod-city').addEventListener('change', function () {
-      renderShippingMethods('home');
-      renderCart();
+    document.getElementById('cod-city').addEventListener('change', async function () {
+      await renderShippingMethods('home');
+      await renderCart();
     });
 
     document.getElementById('cod-confirm').addEventListener('click', async function () {
@@ -1411,11 +1378,17 @@
           throw new Error('Panier vide');
         }
 
-        const shippingMethod = getSelectedShippingMethod() || 'home';
-        const shippingOptions = getShippingOptions(fields.wilaya);
-        const activeShipping = shippingOptions.find(option => option.id === shippingMethod) || shippingOptions[0] || null;
+        const settings = await getMetaSettings();
+        const shippingOptions = getShippingOptions(settings.shippingFees || {}, fields.wilaya);
+        const activeShipping = shippingOptions.find(option => option.id === getSelectedShippingMethod()) || shippingOptions[0] || null;
+
+        if (!activeShipping) {
+          throw new Error('Desole, nous ne livrons pas a cette wilaya pour le moment.');
+        }
+
+        const shippingMethod = activeShipping.id;
         const subtotal = moneyFromCents(cart.total_price || 0);
-        const shippingPrice = activeShipping ? Number(activeShipping.price.toFixed(2)) : 0;
+        const shippingPrice = Number(activeShipping.price.toFixed(2));
         const totalValue = Number((subtotal + shippingPrice).toFixed(2));
         const tracking = {
           ...buildMetaTrackingDetails(),
@@ -1555,10 +1528,11 @@
       document.getElementById('cod-panel')?.classList.add('cod-open');
     }));
 
-    renderWilayaOptions();
-    renderCityOptions();
-    renderShippingMethods('home');
-    renderCart();
+    void getMetaSettings();
+    void renderWilayaOptions();
+    void renderCityOptions();
+    void renderShippingMethods('home');
+    void renderCart();
   }
 
   function injectCartDrawerButton() {
@@ -1620,8 +1594,7 @@
   }
 
   function injectProductButton() {
-    if (!window.location.pathname.startsWith('/products/')) return;
-    if (document.getElementById('cod-product-btn')) return;
+    if (!window.location.pathname.includes('/products/')) return;
 
     const atcSelectors = [
       'product-form button[type="submit"]',
@@ -1630,16 +1603,35 @@
       'button[name="add"]',
     ];
 
+    function isVisible(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        el.getClientRects().length > 0
+      );
+    }
+
     let atcBtn = null;
     for (const sel of atcSelectors) {
-      atcBtn = document.querySelector(sel);
+      const matches = Array.from(document.querySelectorAll(sel));
+      atcBtn = matches.find(isVisible) || matches[0] || null;
       if (atcBtn) break;
     }
     if (!atcBtn) return;
 
-    const form = document.querySelector(
-      'product-form form, form[action*="/cart/add"], .product-form form'
-    );
+    const existingBtn = document.getElementById('cod-product-btn');
+    if (existingBtn) {
+      const sameContainer = existingBtn.parentNode === atcBtn.parentNode;
+      const samePosition = existingBtn.previousElementSibling === atcBtn;
+      if (sameContainer && samePosition && isVisible(existingBtn)) return;
+      existingBtn.remove();
+    }
+
+    const form =
+      atcBtn.closest('form') ||
+      document.querySelector('product-form form, form[action*="/cart/add"], .product-form form');
 
     if (form && form.dataset.codMetaAtcBound !== '1') {
       form.dataset.codMetaAtcBound = '1';
@@ -1648,8 +1640,11 @@
       });
     }
 
-    const dpb = document.querySelector('.shopify-payment-button, [data-shopify="payment-button"]');
-    if (dpb) dpb.style.display = 'none';
+    document
+      .querySelectorAll('.shopify-payment-button, [data-shopify="payment-button"]')
+      .forEach(function (dpb) {
+        if (isVisible(dpb)) dpb.style.display = 'none';
+      });
 
     const btn = document.createElement('button');
     btn.id = 'cod-product-btn';

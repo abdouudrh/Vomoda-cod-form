@@ -1,11 +1,14 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { getMetaSettingsByShop } from "../models/meta-settings.server";
+import {
+  getShippingOptionsForWilaya,
+  getShippingSettingsByShop,
+} from "../models/shipping-settings.server";
 import { sendMetaPurchaseEvent } from "../services/meta.server";
 import {
   getWilayaData,
   getWilayaName,
   isCommuneInWilaya,
-  normalizeAlgeriaLocationName,
 } from "../data/algeria-locations";
 import { apiVersion, authenticate } from "../shopify.server";
 
@@ -91,67 +94,6 @@ type OfflineSessionLike = {
   accessToken?: string;
 };
 
-const SHIPPING_PRICES_DA: Record<string, number> = {
-  adrar: 650,
-  chlef: 320,
-  laghouat: 580,
-  "oum el bouaghi": 430,
-  batna: 470,
-  bejaia: 360,
-  biskra: 520,
-  bechar: 740,
-  blida: 240,
-  bouira: 310,
-  tamanrasset: 800,
-  tebessa: 560,
-  tlemcen: 420,
-  tiaret: 450,
-  "tizi ouzou": 280,
-  alger: 200,
-  djelfa: 500,
-  jijel: 340,
-  setif: 390,
-  saida: 460,
-  skikda: 350,
-  "sidi bel abbes": 410,
-  annaba: 370,
-  guelma: 440,
-  constantine: 380,
-  medea: 330,
-  mostaganem: 360,
-  "m sila": 490,
-  mascara: 430,
-  ouargla: 610,
-  oran: 300,
-  "el bayadh": 570,
-  illizi: 780,
-  "bordj bou arreridj": 400,
-  boumerdes: 260,
-  "el tarf": 390,
-  tindouf: 790,
-  tissemsilt: 440,
-  "el oued": 540,
-  khenchela: 500,
-  "souk ahras": 460,
-  tipaza: 230,
-  mila: 410,
-  "ain defla": 340,
-  naama: 620,
-  "ain temouchent": 380,
-  ghardaia: 590,
-  relizane: 350,
-  timimoun: 680,
-  "bordj badji mokhtar": 760,
-  "ouled djellal": 470,
-  "beni abbes": 620,
-  "in salah": 710,
-  "in guezzam": 790,
-  touggourt: 530,
-  djanet: 750,
-  "el meghaier": 480,
-  "el menia": 640,
-};
-
 function codJson(payload: Record<string, unknown>) {
   return json(payload, {
     status: 200,
@@ -178,24 +120,6 @@ async function parseCodRequest(request: Request): Promise<CodRequestBody> {
     });
     throw new Error("INVALID_REQUEST_BODY");
   }
-}
-
-function getShippingPriceForWilaya(wilaya?: string) {
-  const key = normalizeAlgeriaLocationName(wilaya);
-  return key ? SHIPPING_PRICES_DA[key] ?? null : null;
-}
-
-function getShippingOptionsForWilaya(wilaya?: string) {
-  const home = getShippingPriceForWilaya(wilaya);
-
-  if (home === null) {
-    return null;
-  }
-
-  return {
-    home,
-    stopDesk: Math.max(home - 100, 0),
-  };
 }
 
 function getTrimmedString(value: unknown) {
@@ -418,8 +342,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const wilayaData = getWilayaData(customerWilaya);
     const items = Array.isArray(body.items) ? body.items : [];
     const tracking = body.tracking || {};
-    const shippingOptions = getShippingOptionsForWilaya(wilayaName || undefined);
-    const shippingMethod = body.shipping?.method === "stop_desk" ? "stop_desk" : "home";
+    const requestedShippingMethod =
+      body.shipping?.method === "stop_desk" ? "stop_desk" : "home";
 
     if (!items.length) {
       return codJson({
@@ -429,7 +353,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!wilayaName || !wilayaData || shippingOptions === null) {
+    if (!wilayaName || !wilayaData) {
       return codJson({
         success: false,
         code: "UNKNOWN_WILAYA_SHIPPING",
@@ -445,12 +369,27 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const shippingTitle =
-      shippingMethod === "stop_desk" ? "Stop desk" : "Livraison a domicile";
-    const shippingPrice =
-      shippingMethod === "stop_desk"
-        ? shippingOptions.stopDesk
-        : shippingOptions.home;
+    const shippingSettings = await getShippingSettingsByShop(session.shop);
+    const shippingOptions = getShippingOptionsForWilaya(
+      shippingSettings,
+      wilayaName,
+    );
+    const activeShipping =
+      shippingOptions.find((option) => option.id === requestedShippingMethod) ||
+      shippingOptions[0] ||
+      null;
+
+    if (!activeShipping) {
+      return codJson({
+        success: false,
+        code: "WILAYA_NOT_DELIVERABLE",
+        error: "Desole, nous ne livrons pas a cette wilaya pour le moment.",
+      });
+    }
+
+    const shippingMethod = activeShipping.id;
+    const shippingTitle = activeShipping.label;
+    const shippingPrice = activeShipping.price;
 
     const lineItems = items.map((item) => ({
       variantId: `gid://shopify/ProductVariant/${item.variant_id}`,

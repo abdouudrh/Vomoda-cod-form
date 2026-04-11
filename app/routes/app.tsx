@@ -18,7 +18,8 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
-        <s-link href="/app">Meta Settings</s-link>
+        <s-link href="/app/facebook-pixel">Facebook Pixel</s-link>
+        <s-link href="/app/shipping-fees">Shipping fees</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>
