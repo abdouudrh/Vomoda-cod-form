@@ -1,0 +1,1736 @@
+{% schema %}
+{
+  "name": "COD Cart Drawer",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}
+
+<style>
+  #cod-dialog {
+    border: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  #cod-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  #cod-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 420px;
+    max-width: 100vw;
+    height: 100dvh;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+    z-index: 999999;
+  }
+
+  #cod-panel.cod-open {
+    transform: translateX(0);
+  }
+
+  .cod-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    background: rgba(255, 255, 255, 0.94);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+    z-index: 3;
+  }
+
+  .cod-loading-overlay.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .cod-loading-spinner {
+    position: relative;
+    width: 72px;
+    height: 72px;
+  }
+
+  .cod-loading-spinner-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    border-radius: 999px;
+    background: #ff6a1a;
+    opacity: 0.14;
+    animation: cod-loading-fade 1s linear infinite;
+  }
+
+  .cod-loading-spinner-dot:nth-child(1) {
+    transform: translateY(-28px);
+    animation-delay: -0.875s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(2) {
+    transform: rotate(45deg) translateY(-28px);
+    animation-delay: -0.75s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(3) {
+    transform: rotate(90deg) translateY(-28px);
+    animation-delay: -0.625s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(4) {
+    transform: rotate(135deg) translateY(-28px);
+    animation-delay: -0.5s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(5) {
+    transform: rotate(180deg) translateY(-28px);
+    animation-delay: -0.375s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(6) {
+    transform: rotate(225deg) translateY(-28px);
+    animation-delay: -0.25s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(7) {
+    transform: rotate(270deg) translateY(-28px);
+    animation-delay: -0.125s;
+  }
+
+  .cod-loading-spinner-dot:nth-child(8) {
+    transform: rotate(315deg) translateY(-28px);
+    animation-delay: 0s;
+  }
+
+  .cod-loading-text {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ff6a1a;
+    text-align: center;
+  }
+
+  @keyframes cod-loading-fade {
+    0% {
+      opacity: 1;
+    }
+
+    100% {
+      opacity: 0.14;
+    }
+  }
+
+  .cod-field {
+    width: 100%;
+    height: 46px;
+    padding: 0 14px;
+    border: 1.5px solid #e0e0e0;
+    border-radius: 8px;
+    box-sizing: border-box;
+    font-size: 14px;
+    font-family: inherit;
+    color: #111;
+    background: #fff;
+    outline: none;
+    transition: border-color 0.15s;
+    display: block;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .cod-field:focus {
+    border-color: #111;
+  }
+
+  .cod-field::placeholder {
+    color: #aaa;
+  }
+
+  .cod-field:disabled {
+    background: #f3f4f6;
+    color: #8a8a8a;
+    border-color: #e5e7eb;
+    cursor: not-allowed;
+  }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window.__codInitialized) return;
+  window.__codInitialized = true;
+
+  const COD_BUTTON_BACKGROUND = '#ff6a1a';
+  const COD_BUTTON_TEXT = '#fff';
+
+  const SHIPPING_PRICES_DA = {
+    'adrar': 650,
+    'chlef': 320,
+    'laghouat': 580,
+    'oum el bouaghi': 430,
+    'batna': 470,
+    'bejaia': 360,
+    'biskra': 520,
+    'bechar': 740,
+    'blida': 240,
+    'bouira': 310,
+    'tamanrasset': 800,
+    'tebessa': 560,
+    'tlemcen': 420,
+    'tiaret': 450,
+    'tizi ouzou': 280,
+    'alger': 200,
+    'djelfa': 500,
+    'jijel': 340,
+    'setif': 390,
+    'saida': 460,
+    'skikda': 350,
+    'sidi bel abbes': 410,
+    'annaba': 370,
+    'guelma': 440,
+    'constantine': 380,
+    'medea': 330,
+    'mostaganem': 360,
+    'm sila': 490,
+    'mascara': 430,
+    'ouargla': 610,
+    'oran': 300,
+    'el bayadh': 570,
+    'illizi': 780,
+    'bordj bou arreridj': 400,
+    'boumerdes': 260,
+    'el tarf': 390,
+    'tindouf': 790,
+    'tissemsilt': 440,
+    'el oued': 540,
+    'khenchela': 500,
+    'souk ahras': 460,
+    'tipaza': 230,
+    'mila': 410,
+    'ain defla': 340,
+    'naama': 620,
+    'ain temouchent': 380,
+    'ghardaia': 590,
+    'relizane': 350,
+    'timimoun': 680,
+    'bordj badji mokhtar': 760,
+    'ouled djellal': 470,
+    'beni abbes': 620,
+    'in salah': 710,
+    'in guezzam': 790,
+    'touggourt': 530,
+    'djanet': 750,
+    'el meghaier': 480,
+    'el menia': 640
+  };
+
+  function normalizeWilayaName(value) {
+    return (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+  }
+
+  function getShippingPrice(wilaya) {
+    if (!wilaya) return null;
+    const key = normalizeWilayaName(wilaya);
+    return Object.prototype.hasOwnProperty.call(SHIPPING_PRICES_DA, key)
+      ? SHIPPING_PRICES_DA[key]
+      : null;
+  }
+
+  function getShippingOptions(wilaya) {
+    const homePrice = getShippingPrice(wilaya);
+    if (homePrice === null) return [];
+
+    return [
+      {
+        id: 'home',
+        label: 'Livraison a domicile',
+        price: homePrice
+      },
+      {
+        id: 'stop_desk',
+        label: 'Stop desk',
+        price: Math.max(homePrice - 100, 0)
+      }
+    ];
+  }
+
+  function getSelectedShippingMethod() {
+    return document.querySelector('input[name="cod-shipping-method"]:checked')?.value || '';
+  }
+
+  function hasSelectedDeliveryLocation() {
+    const wilaya = document.getElementById('cod-wilaya')?.value || '';
+    const city = document.getElementById('cod-city')?.value || '';
+    return Boolean(wilaya && city);
+  }
+
+  function getCookieValue(name) {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function buildMetaTrackingDetails() {
+    const pageUrl = new URL(window.location.href);
+    const fbclid = pageUrl.searchParams.get('fbclid') || '';
+    const cookieFbp = getCookieValue('_fbp');
+    const cookieFbc = getCookieValue('_fbc');
+    const eventId = `cod_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+    return {
+      eventId,
+      fbp: cookieFbp,
+      fbc: cookieFbc || (fbclid ? `fb.1.${Date.now()}.${fbclid}` : ''),
+      fbclid,
+      eventSourceUrl: pageUrl.toString(),
+      referrer: document.referrer || '',
+      userAgent: navigator.userAgent || '',
+      language: navigator.language || '',
+      utmSource: pageUrl.searchParams.get('utm_source') || '',
+      utmMedium: pageUrl.searchParams.get('utm_medium') || '',
+      utmCampaign: pageUrl.searchParams.get('utm_campaign') || '',
+      utmContent: pageUrl.searchParams.get('utm_content') || '',
+      utmTerm: pageUrl.searchParams.get('utm_term') || ''
+    };
+  }
+
+  function moneyFromCents(value) {
+    return Number((Number(value || 0) / 100).toFixed(2));
+  }
+
+  let metaSettingsPromise = null;
+  let metaPixelScriptPromise = null;
+
+  async function getMetaSettings() {
+    if (window.__codMetaSettings) {
+      return window.__codMetaSettings;
+    }
+
+    if (!metaSettingsPromise) {
+      metaSettingsPromise = fetch('/apps/cod/settings', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin'
+      })
+        .then(async response => {
+          const raw = await response.text();
+          let result = null;
+
+          try {
+            result = raw ? JSON.parse(raw) : null;
+          } catch (error) {
+            console.error('[COD] invalid Meta settings response:', {
+              status: response.status,
+              statusText: response.statusText,
+              body: raw,
+              error
+            });
+            return {
+              metaEnabled: false,
+              metaPixelId: ''
+            };
+          }
+
+          const settings = result?.success === true && result?.settings
+            ? {
+                metaEnabled: Boolean(result.settings.metaEnabled),
+                metaPixelId: String(result.settings.metaPixelId || '').trim()
+              }
+            : {
+                metaEnabled: false,
+                metaPixelId: ''
+              };
+
+          window.__codMetaSettings = settings;
+          return settings;
+        })
+        .catch(error => {
+          console.error('[COD] Meta settings loading failed:', error);
+          return {
+            metaEnabled: false,
+            metaPixelId: ''
+          };
+        });
+    }
+
+    return metaSettingsPromise;
+  }
+
+  function ensureFbqStub() {
+    if (typeof window.fbq === 'function') {
+      return window.fbq;
+    }
+
+    const fbq = function () {
+      if (fbq.callMethod) {
+        fbq.callMethod.apply(fbq, arguments);
+      } else {
+        fbq.queue.push(arguments);
+      }
+    };
+
+    if (!window._fbq) {
+      window._fbq = fbq;
+    }
+
+    fbq.push = fbq;
+    fbq.loaded = true;
+    fbq.version = '2.0';
+    fbq.queue = [];
+    window.fbq = fbq;
+
+    return fbq;
+  }
+
+  function loadMetaPixelScript() {
+    if (typeof window.fbq === 'function' && window.fbq.callMethod) {
+      return Promise.resolve(window.fbq);
+    }
+
+    ensureFbqStub();
+
+    if (!metaPixelScriptPromise) {
+      metaPixelScriptPromise = new Promise((resolve, reject) => {
+        const existing = document.getElementById('cod-meta-pixel-script');
+
+        if (existing) {
+          existing.addEventListener('load', () => resolve(window.fbq), { once: true });
+          existing.addEventListener('error', () => reject(new Error('Meta Pixel script failed to load')), { once: true });
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.id = 'cod-meta-pixel-script';
+        script.async = true;
+        script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+        script.onload = () => resolve(window.fbq);
+        script.onerror = () => {
+          metaPixelScriptPromise = null;
+          reject(new Error('Meta Pixel script failed to load'));
+        };
+
+        const anchor = document.getElementsByTagName('script')[0];
+        if (anchor && anchor.parentNode) {
+          anchor.parentNode.insertBefore(script, anchor);
+        } else {
+          document.head.appendChild(script);
+        }
+      });
+    }
+
+    return metaPixelScriptPromise;
+  }
+
+  async function ensureMetaPixelReady() {
+    const settings = await getMetaSettings();
+
+    if (!settings.metaEnabled || !settings.metaPixelId) {
+      return null;
+    }
+
+    await loadMetaPixelScript();
+
+    if (!window.__codMetaPixelIds) {
+      window.__codMetaPixelIds = {};
+    }
+
+    if (!window.__codMetaPixelIds[settings.metaPixelId]) {
+      window.fbq('init', settings.metaPixelId);
+      window.__codMetaPixelIds[settings.metaPixelId] = true;
+    }
+
+    if (!window.__codMetaPageViewTracked) {
+      window.fbq('track', 'PageView');
+      window.__codMetaPageViewTracked = true;
+    }
+
+    return settings;
+  }
+
+  async function trackMetaPurchaseEvent({ cart, tracking, orderId, orderName }) {
+    if (!tracking?.eventId) {
+      return;
+    }
+
+    const settings = await ensureMetaPixelReady();
+    if (!settings || typeof window.fbq !== 'function') {
+      return;
+    }
+
+    if (!window.__codTrackedMetaEvents) {
+      window.__codTrackedMetaEvents = {};
+    }
+
+    if (window.__codTrackedMetaEvents[tracking.eventId]) {
+      return;
+    }
+
+    const contents = (cart.items || [])
+      .map(item => ({
+        id: String(item.product_id || item.variant_id || ''),
+        quantity: Number(item.quantity) || 1,
+        item_price: moneyFromCents(item.final_price || item.price || 0)
+      }))
+      .filter(item => item.id);
+
+    const params = {
+      currency: tracking.currency || 'DZD',
+      value: Number(tracking.totalValue || 0),
+      content_type: 'product',
+      content_ids: contents.map(item => item.id),
+      contents,
+      num_items: (cart.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+      order_id: orderName || orderId || tracking.eventId
+    };
+
+    window.fbq('track', 'Purchase', params, { eventID: tracking.eventId });
+    window.__codTrackedMetaEvents[tracking.eventId] = true;
+  }
+
+  function getActiveCurrency() {
+    return window.Shopify?.currency?.active || window.Shopify?.currency?.currency || 'DZD';
+  }
+
+  function buildCartMetaParams(cart) {
+    const contents = (cart.items || [])
+      .map(item => ({
+        id: String(item.product_id || item.variant_id || ''),
+        quantity: Number(item.quantity) || 1,
+        item_price: moneyFromCents(item.final_price || item.price || 0)
+      }))
+      .filter(item => item.id);
+
+    return {
+      currency: cart.currency || getActiveCurrency(),
+      value: moneyFromCents(cart.total_price || 0),
+      content_type: 'product',
+      content_ids: contents.map(item => item.id),
+      contents,
+      num_items: (cart.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+    };
+  }
+
+  function buildAddToCartParamsFromForm(form) {
+    const formData = new FormData(form);
+    const variantId = String(formData.get('id') || formData.get('variant_id') || '').trim();
+    const quantity = Math.max(1, Number(formData.get('quantity') || 1));
+    const contents = variantId
+      ? [{ id: variantId, quantity }]
+      : [];
+
+    return {
+      currency: getActiveCurrency(),
+      value: 0,
+      content_type: 'product',
+      content_ids: contents.map(item => item.id),
+      contents,
+      num_items: quantity
+    };
+  }
+
+  function buildAddToCartParamsFromItem(item) {
+    const quantity = Math.max(1, Number(item?.quantity) || 1);
+    const itemPriceCents = Number(item?.final_price || item?.price || 0);
+    const itemId = String(item?.product_id || item?.variant_id || '').trim();
+    const contents = itemId
+      ? [{ id: itemId, quantity, item_price: moneyFromCents(itemPriceCents) }]
+      : [];
+
+    return {
+      currency: getActiveCurrency(),
+      value: Number((moneyFromCents(itemPriceCents) * quantity).toFixed(2)),
+      content_type: 'product',
+      content_ids: contents.map(content => content.id),
+      contents,
+      num_items: quantity
+    };
+  }
+
+  async function trackMetaBrowserEvent(eventName, params) {
+    const settings = await ensureMetaPixelReady();
+    if (!settings || typeof window.fbq !== 'function') {
+      return;
+    }
+
+    window.fbq('track', eventName, params);
+  }
+
+  let locationDataPromise = null;
+
+  function getWilayaLocationData(locations, wilaya) {
+    if (!locations || !wilaya) return null;
+
+    if (locations[wilaya]) {
+      return locations[wilaya];
+    }
+
+    const normalizedWilaya = normalizeWilayaName(wilaya);
+    const matchedKey = Object.keys(locations).find(
+      key => normalizeWilayaName(key) === normalizedWilaya
+    );
+
+    return matchedKey ? locations[matchedKey] : null;
+  }
+
+  async function getLocationData() {
+    if (window.__codLocationData) {
+      return window.__codLocationData;
+    }
+
+    if (!locationDataPromise) {
+      locationDataPromise = fetch('/apps/cod/locations', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin'
+      })
+        .then(async response => {
+          const raw = await response.text();
+          let result = null;
+
+          try {
+            result = raw ? JSON.parse(raw) : null;
+          } catch (error) {
+            console.error('[COD] invalid locations response:', {
+              status: response.status,
+              statusText: response.statusText,
+              body: raw,
+              error
+            });
+            throw new Error('Reponse invalide du serveur des localites');
+          }
+
+          if (!response.ok || !result || result.success !== true || !result.wilayas) {
+            console.error('[COD] locations loading failed:', {
+              status: response.status,
+              statusText: response.statusText,
+              body: result || raw
+            });
+            throw new Error(result?.error || 'Impossible de charger les localites');
+          }
+
+          window.__codLocationData = result.wilayas;
+          return result.wilayas;
+        })
+        .catch(error => {
+          locationDataPromise = null;
+          throw error;
+        });
+    }
+
+    return locationDataPromise;
+  }
+
+  async function renderWilayaOptions(preferredWilaya = '') {
+    const wilayaEl = document.getElementById('cod-wilaya');
+
+    if (!wilayaEl) return;
+
+    wilayaEl.innerHTML = '';
+    wilayaEl.disabled = true;
+
+    const loadingOption = document.createElement('option');
+    loadingOption.value = '';
+    loadingOption.textContent = 'Chargement...';
+    wilayaEl.appendChild(loadingOption);
+
+    try {
+      const locations = await getLocationData();
+      const wilayaEntries = Object.entries(locations).sort(([, a], [, b]) => {
+        const codeA = Number(a?.code || 0);
+        const codeB = Number(b?.code || 0);
+        return codeA - codeB;
+      });
+
+      wilayaEl.innerHTML = '';
+
+      const placeholderOption = document.createElement('option');
+      placeholderOption.value = '';
+      placeholderOption.textContent = 'Wilaya';
+      wilayaEl.appendChild(placeholderOption);
+
+      wilayaEntries.forEach(([wilayaName, wilayaData]) => {
+        const option = document.createElement('option');
+        option.value = wilayaName;
+        option.textContent = `${String(wilayaData.code).padStart(2, '0')} - ${wilayaName}`;
+        wilayaEl.appendChild(option);
+      });
+
+      wilayaEl.disabled = false;
+
+      const normalizedPreferred = normalizeWilayaName(preferredWilaya);
+      const matchedWilaya = wilayaEntries.find(
+        ([wilayaName]) => normalizeWilayaName(wilayaName) === normalizedPreferred
+      );
+
+      wilayaEl.value = matchedWilaya ? matchedWilaya[0] : '';
+    } catch (error) {
+      console.error('[COD] wilaya loading error:', error);
+      wilayaEl.innerHTML = '';
+
+      const errorOption = document.createElement('option');
+      errorOption.value = '';
+      errorOption.textContent = 'Impossible de charger les wilayas';
+      wilayaEl.appendChild(errorOption);
+      wilayaEl.disabled = true;
+    }
+  }
+
+  async function renderCityOptions(preferredCity = '') {
+    const cityEl = document.getElementById('cod-city');
+    const wilaya = document.getElementById('cod-wilaya')?.value || '';
+
+    if (!cityEl) return;
+
+    cityEl.innerHTML = '';
+
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+
+    if (!wilaya) {
+      defaultOption.textContent = 'Choisissez une wilaya d\'abord';
+      cityEl.appendChild(defaultOption);
+      cityEl.disabled = true;
+      return;
+    }
+
+    defaultOption.textContent = 'Chargement...';
+    cityEl.appendChild(defaultOption);
+    cityEl.disabled = true;
+
+    try {
+      const locations = await getLocationData();
+      const wilayaData = getWilayaLocationData(locations, wilaya);
+      const communes = Array.isArray(wilayaData?.communes) ? wilayaData.communes : [];
+
+      cityEl.innerHTML = '';
+
+      const placeholderOption = document.createElement('option');
+      placeholderOption.value = '';
+      placeholderOption.textContent = communes.length
+        ? 'Province / Commune'
+        : 'Aucune commune disponible';
+      cityEl.appendChild(placeholderOption);
+
+      if (!communes.length) {
+        cityEl.disabled = true;
+        return;
+      }
+
+      communes.forEach(commune => {
+        const option = document.createElement('option');
+        option.value = commune;
+        option.textContent = commune;
+        cityEl.appendChild(option);
+      });
+
+      cityEl.disabled = false;
+      cityEl.value = communes.includes(preferredCity) ? preferredCity : '';
+    } catch (error) {
+      console.error('[COD] location loading error:', error);
+      cityEl.innerHTML = '';
+
+      const errorOption = document.createElement('option');
+      errorOption.value = '';
+      errorOption.textContent = 'Impossible de charger les communes';
+      cityEl.appendChild(errorOption);
+      cityEl.disabled = true;
+    }
+  }
+
+  async function fetchCart() {
+    const r = await fetch('/cart.js', { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('cart fetch failed');
+    return r.json();
+  }
+
+  function notifyCartUpdated(cart) {
+    const detail = { cart };
+
+    try {
+      if (window.Shopify && typeof window.Shopify.onCartUpdate === 'function') {
+        window.Shopify.onCartUpdate(cart);
+      }
+    } catch (error) {
+      console.warn('[COD] Shopify.onCartUpdate failed:', error);
+    }
+
+    ['cart:refresh', 'cart:updated', 'cart:change'].forEach(eventName => {
+      document.dispatchEvent(new CustomEvent(eventName, { bubbles: true, detail }));
+      window.dispatchEvent(new CustomEvent(eventName, { detail }));
+    });
+  }
+
+  async function updateCartLineQuantity(line, quantity) {
+    const parsedLine = Number(line);
+    const parsedQuantity = Number(quantity);
+
+    if (!Number.isInteger(parsedLine) || parsedLine < 1) {
+      throw new Error('Ligne de panier invalide.');
+    }
+
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
+      throw new Error('Quantite invalide.');
+    }
+
+    const response = await fetch('/cart/change.js', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        line: parsedLine,
+        quantity: parsedQuantity
+      })
+    });
+
+    const raw = await response.text();
+    let cart = null;
+
+    try {
+      cart = raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      console.error('[COD] invalid cart/change response:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: raw,
+        error
+      });
+      throw new Error('Reponse invalide lors de la mise a jour du panier.');
+    }
+
+    if (!response.ok || !cart) {
+      throw new Error(cart?.description || 'Impossible de mettre a jour la quantite.');
+    }
+
+    notifyCartUpdated(cart);
+    return cart;
+  }
+
+  function setCartQuantityControlsDisabled(disabled) {
+    document
+      .querySelectorAll('[data-cod-qty-step], [data-cod-qty-input], [data-cod-remove-line]')
+      .forEach(control => {
+        control.disabled = disabled;
+      });
+  }
+
+  function setCodSubmittingState(submitting) {
+    const panel = document.getElementById('cod-panel');
+    const overlay = document.getElementById('cod-loading-overlay');
+    const closeButton = document.getElementById('cod-close');
+
+    if (panel) {
+      panel.dataset.submitting = submitting ? '1' : '0';
+    }
+
+    if (overlay) {
+      overlay.classList.toggle('is-visible', Boolean(submitting));
+      overlay.setAttribute('aria-hidden', submitting ? 'false' : 'true');
+    }
+
+    if (closeButton) {
+      closeButton.disabled = Boolean(submitting);
+      closeButton.style.opacity = submitting ? '0.5' : '1';
+      closeButton.style.cursor = submitting ? 'not-allowed' : 'pointer';
+    }
+  }
+
+  let isCartQuantityUpdateInFlight = false;
+
+  async function handleCartQuantityUpdate(line, quantity) {
+    if (isCartQuantityUpdateInFlight) return;
+
+    const parsedQuantity = Number(quantity);
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 1) {
+      throw new Error('Quantite invalide.');
+    }
+
+    isCartQuantityUpdateInFlight = true;
+    setCartQuantityControlsDisabled(true);
+
+    try {
+      const updatedCart = await updateCartLineQuantity(line, parsedQuantity);
+      await renderCart(updatedCart);
+    } catch (error) {
+      console.error('[COD] cart quantity update failed:', error);
+      alert(error.message || 'Impossible de mettre a jour la quantite.');
+      await renderCart();
+    } finally {
+      isCartQuantityUpdateInFlight = false;
+      setCartQuantityControlsDisabled(false);
+    }
+  }
+
+  async function handleCartLineRemoval(line) {
+    if (isCartQuantityUpdateInFlight) return;
+
+    isCartQuantityUpdateInFlight = true;
+    setCartQuantityControlsDisabled(true);
+
+    try {
+      const updatedCart = await updateCartLineQuantity(line, 0);
+      await renderCart(updatedCart);
+    } catch (error) {
+      console.error('[COD] cart line removal failed:', error);
+      alert(error.message || 'Impossible de supprimer le produit.');
+      await renderCart();
+    } finally {
+      isCartQuantityUpdateInFlight = false;
+      setCartQuantityControlsDisabled(false);
+    }
+  }
+
+  function getThankYouUrl() {
+    return new URL('/pages/thank-you', window.location.origin).toString();
+  }
+
+  function persistThankYouPageData(data) {
+    try {
+      const payload = JSON.stringify({
+        ...data,
+        savedAt: Date.now()
+      });
+      window.sessionStorage.setItem('codThankYouData', payload);
+      window.localStorage.setItem('codThankYouData', payload);
+    } catch (error) {
+      console.error('[COD] thank you page data persistence failed:', error);
+    }
+  }
+
+  async function clearCartAndVerify() {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const clearCartRes = await fetch('/cart/clear.js', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'same-origin'
+      });
+
+      if (!clearCartRes.ok) {
+        continue;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const updatedCart = await fetchCart();
+      if (!updatedCart.items?.length && !updatedCart.item_count) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function tryCloseThemeCart() {
+    const closeBtn = document.querySelector(
+      'cart-drawer [id*="close"], cart-drawer button[aria-label*="lose"], ' +
+      '.cart-drawer button[aria-label*="lose"], .drawer button[aria-label*="lose"]'
+    );
+    if (closeBtn) {
+      closeBtn.click();
+      return;
+    }
+
+    document.dispatchEvent(new CustomEvent('cart:close', { bubbles: true }));
+    document.dispatchEvent(new CustomEvent('drawer:close', { bubbles: true }));
+
+    const cartDrawerEl = document.querySelector('cart-drawer');
+    if (cartDrawerEl && typeof cartDrawerEl.close === 'function') {
+      cartDrawerEl.close();
+    }
+
+    const openClasses = ['is-open', 'active', 'open', 'js-drawer-open', 'drawer-open'];
+    document.documentElement.classList.remove(...openClasses);
+    document.body.classList.remove(...openClasses);
+  }
+
+  async function renderCart(cartData = null) {
+    const summaryEl = document.getElementById('cod-summary');
+    const totalEl = document.getElementById('cod-total');
+    if (!summaryEl || !totalEl) return;
+
+    summaryEl.innerHTML = '<p style="color:#888;font-size:14px;">Chargement…</p>';
+
+    try {
+      const cart = cartData || await fetchCart();
+
+      if (!cart.items || cart.items.length === 0) {
+        summaryEl.innerHTML = '<p style="color:#888;font-size:14px;">Votre panier est vide.</p>';
+        totalEl.innerHTML = '';
+        return;
+      }
+
+      summaryEl.innerHTML = cart.items.map(item => `
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #f0f0f0;">
+          <img
+            src="${item.image || ''}"
+            alt="${item.product_title || ''}"
+            style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #eee;flex-shrink:0;"
+          />
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${item.product_title || ''}
+            </div>
+            ${item.variant_title ? `<div style="font-size:12px;color:#888;margin-top:2px;">${item.variant_title}</div>` : ''}
+            <div style="font-size:12px;color:#888;margin-top:2px;">Qté : ${item.quantity}</div>
+          </div>
+          <div style="font-size:14px;font-weight:600;color:#111;white-space:nowrap;flex-shrink:0;">
+            ${(item.line_price / 100).toFixed(2)} DA
+          </div>
+        </div>
+      `).join('');
+
+      Array.from(summaryEl.children).forEach((itemRow, index) => {
+        const item = cart.items[index];
+        const detailsEl = itemRow.children[1];
+        const quantityEl = detailsEl?.lastElementChild;
+
+        if (!item || !detailsEl || !quantityEl) return;
+
+        quantityEl.outerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+            <span style="font-size:12px;color:#888;flex-shrink:0;">QtÃ©</span>
+            <div style="display:inline-flex;align-items:center;border:1px solid #e5e5e5;border-radius:999px;overflow:hidden;background:#fff;">
+              <button
+                type="button"
+                data-cod-qty-step="-1"
+                data-cod-line="${index + 1}"
+                aria-label="Diminuer la quantite"
+                style="width:30px;height:30px;border:none;background:transparent;color:#111;font-size:18px;cursor:pointer;line-height:1;"
+              >-</button>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                value="${item.quantity}"
+                data-cod-qty-input="1"
+                data-cod-line="${index + 1}"
+                data-cod-quantity="${item.quantity}"
+                aria-label="Modifier la quantite"
+                style="width:48px;height:30px;border:none;border-left:1px solid #e5e5e5;border-right:1px solid #e5e5e5;text-align:center;font-size:13px;font-weight:600;color:#111;padding:0;background:#fff;"
+              />
+              <button
+                type="button"
+                data-cod-qty-step="1"
+                data-cod-line="${index + 1}"
+                aria-label="Augmenter la quantite"
+                style="width:30px;height:30px;border:none;background:transparent;color:#111;font-size:18px;cursor:pointer;line-height:1;"
+              >+</button>
+            </div>
+            <button
+              type="button"
+              data-cod-remove-line="${index + 1}"
+              aria-label="Supprimer le produit"
+              style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;background:transparent;color:#111;cursor:pointer;padding:0;flex-shrink:0;"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2.5 4h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                <path d="M6.5 2.5h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                <path d="M4 4l.5 8.2c.03.73.64 1.3 1.38 1.3h4.24c.74 0 1.35-.57 1.38-1.3L12 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M6.5 6.5v4.5M9.5 6.5v4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        `;
+
+        const quantityControl = detailsEl.lastElementChild;
+        const quantityLabel = quantityControl?.querySelector('span');
+        if (quantityLabel) quantityLabel.textContent = 'Qte';
+      });
+
+      const subtotal = cart.total_price / 100;
+      const selectedWilaya = document.getElementById('cod-wilaya')?.value || '';
+      const hasDeliveryLocation = hasSelectedDeliveryLocation();
+      const shippingOptions = hasDeliveryLocation ? getShippingOptions(selectedWilaya) : [];
+      const selectedMethod = getSelectedShippingMethod();
+      const activeShipping = shippingOptions.find(option => option.id === selectedMethod) || shippingOptions[0] || null;
+      const grandTotal = activeShipping ? subtotal + activeShipping.price : null;
+
+      totalEl.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 0;font-size:14px;color:#666;">
+          <span>Sous-total</span>
+          <span>${subtotal.toFixed(2)} DA</span>
+        </div>
+        ${!hasDeliveryLocation ? `
+          <div style="padding:10px 0 0;font-size:13px;color:#888;">
+            Choisissez votre wilaya et commune pour afficher le prix de livraison.
+          </div>
+        ` : !activeShipping ? `
+          <div style="padding:10px 0 0;font-size:13px;color:#888;">
+            Choisissez un mode de livraison.
+          </div>
+        ` : `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;font-size:14px;color:#666;">
+            <span>${activeShipping.label}</span>
+            <span>${activeShipping.price.toFixed(2)} DA</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 0;margin-top:8px;border-top:1px solid #f0f0f0;font-size:17px;font-weight:700;color:#111;">
+            <span>Total</span>
+            <span>${grandTotal.toFixed(2)} DA</span>
+          </div>
+        `}
+      `;
+    } catch (err) {
+      summaryEl.innerHTML = '<p style="color:#c00;font-size:14px;">Impossible de charger le panier.</p>';
+      totalEl.innerHTML = '';
+    }
+  }
+
+  function renderShippingMethods(preferredMethod = '') {
+    const methodsEl = document.getElementById('cod-shipping-methods');
+    const wilaya = document.getElementById('cod-wilaya')?.value || '';
+    const city = document.getElementById('cod-city')?.value || '';
+    if (!methodsEl) return;
+
+    if (!wilaya || !city) {
+      methodsEl.innerHTML = '';
+      methodsEl.style.display = 'none';
+      return;
+    }
+
+    const options = getShippingOptions(wilaya);
+    if (!options.length) {
+      methodsEl.innerHTML = '';
+      methodsEl.style.display = 'none';
+      return;
+    }
+
+    const currentMethod = preferredMethod || getSelectedShippingMethod();
+    const selectedMethod = options.some(option => option.id === currentMethod)
+      ? currentMethod
+      : 'home';
+
+    methodsEl.innerHTML = `
+      <p style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.05em;margin:0 0 10px;">
+        Mode de livraison
+      </p>
+      ${options.map(option => `
+        <label style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;margin-bottom:8px;border:1px solid #e5e5e5;border-radius:10px;cursor:pointer;">
+          <span style="display:flex;align-items:center;gap:10px;">
+            <input
+              type="radio"
+              name="cod-shipping-method"
+              value="${option.id}"
+              ${selectedMethod === option.id ? 'checked' : ''}
+              style="margin:0;"
+            />
+            <span style="font-size:14px;color:#111;">${option.label}</span>
+          </span>
+          <span style="font-size:14px;font-weight:600;color:#111;">${option.price.toFixed(2)} DA</span>
+        </label>
+      `).join('')}
+    `;
+
+    methodsEl.style.display = 'block';
+
+    methodsEl.querySelectorAll('input[name="cod-shipping-method"]').forEach(input => {
+      input.addEventListener('change', function () {
+        renderCart();
+      });
+    });
+  }
+
+  function openCodDrawer() {
+    document.getElementById('cod-dialog')?.remove();
+
+    const dialog = document.createElement('dialog');
+    dialog.id = 'cod-dialog';
+
+    dialog.innerHTML = `
+      <div id="cod-panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 18px;border-bottom:1px solid #f0f0f0;flex-shrink:0;">
+          <h2 style="margin:0;font-size:22px;font-weight:700;color:#111;">Votre commande</h2>
+          <button
+            id="cod-close"
+            type="button"
+            aria-label="Fermer"
+            style="background:none;border:none;cursor:pointer;padding:6px;border-radius:6px;color:#666;font-size:24px;line-height:1;display:flex;align-items:center;justify-content:center;"
+          >&#x2715;</button>
+        </div>
+
+        <div id="cod-loading-overlay" class="cod-loading-overlay" aria-hidden="true">
+          <div class="cod-loading-spinner" aria-hidden="true">
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+            <span class="cod-loading-spinner-dot"></span>
+          </div>
+          <p class="cod-loading-text">Création de la commande...</p>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px;">
+          <div id="cod-summary" style="margin-bottom:20px;"></div>
+
+          <p style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.05em;margin:0 0 14px;">
+            Vos coordonnées
+          </p>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <input id="cod-firstName" type="text" placeholder="Prénom" autocomplete="given-name" class="cod-field" />
+            <input id="cod-lastName" type="text" placeholder="Nom" autocomplete="family-name" class="cod-field" />
+          </div>
+
+          <input
+            id="cod-phone" type="tel" placeholder="Numéro de téléphone"
+            autocomplete="tel" class="cod-field" style="margin-bottom:10px;"
+          />
+
+          <input
+            id="cod-email" type="email" placeholder="Email (optionnel)"
+            autocomplete="email" class="cod-field" style="margin-bottom:10px;"
+          />
+
+          <input
+            id="cod-address" type="text" placeholder="Adresse complète"
+            autocomplete="street-address" class="cod-field" style="margin-bottom:10px;"
+          />
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:22px;">
+            <select id="cod-city" class="cod-field" style="order:2;" disabled>
+              <option value="">Choisissez une wilaya d'abord</option>
+            </select>
+            <select id="cod-wilaya" class="cod-field" style="cursor:pointer;order:1;" disabled>
+              <option value="">Chargement...</option>
+            </select>
+          </div>
+
+          <div id="cod-shipping-methods" style="display:none;margin-bottom:22px;"></div>
+
+          <div id="cod-total" style="margin-bottom:20px;"></div>
+
+          <textarea
+            id="cod-note"
+            placeholder="Note pour votre commande (optionnel)"
+            class="cod-field"
+            style="height:92px;padding:12px 14px;margin:0 0 16px;resize:vertical;"
+          ></textarea>
+
+          <button
+            id="cod-confirm"
+            type="button"
+            style="width:100%;height:50px;background:${COD_BUTTON_BACKGROUND};color:${COD_BUTTON_TEXT};border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.02em;transition:opacity .15s;"
+          >
+            ✓ &nbsp;Confirmer la commande
+          </button>
+
+          <p style="text-align:center;font-size:12px;color:#aaa;margin:12px 0 0;">
+            Paiement à la livraison · Livraison partout en Algérie
+          </p>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(dialog);
+
+    function closeCod() {
+      if (document.getElementById('cod-panel')?.dataset.submitting === '1') {
+        return;
+      }
+
+      const panel = document.getElementById('cod-panel');
+      if (panel) panel.classList.remove('cod-open');
+      setTimeout(() => {
+        dialog.close();
+        dialog.remove();
+      }, 290);
+    }
+
+    document.getElementById('cod-close').addEventListener('click', closeCod);
+
+    dialog.addEventListener('click', function (e) {
+      const panel = document.getElementById('cod-panel');
+      if (panel && !panel.contains(e.target)) closeCod();
+    });
+
+    dialog.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      closeCod();
+    });
+
+    dialog.addEventListener('click', function (e) {
+      const removeButton = e.target.closest('[data-cod-remove-line]');
+      if (removeButton && !isCartQuantityUpdateInFlight) {
+        e.preventDefault();
+        const line = removeButton.getAttribute('data-cod-remove-line');
+        void handleCartLineRemoval(line);
+        return;
+      }
+
+      const qtyButton = e.target.closest('[data-cod-qty-step]');
+      if (!qtyButton || isCartQuantityUpdateInFlight) return;
+
+      e.preventDefault();
+
+      const line = qtyButton.getAttribute('data-cod-line');
+      const step = Number(qtyButton.getAttribute('data-cod-qty-step') || 0);
+      const qtyInput = dialog.querySelector(`[data-cod-qty-input][data-cod-line="${line}"]`);
+      const currentQuantity = Number(
+        qtyInput?.value || qtyInput?.getAttribute('data-cod-quantity') || 1
+      );
+      const nextQuantity = Math.max(1, currentQuantity + step);
+
+      if (qtyInput) {
+        qtyInput.value = String(nextQuantity);
+      }
+
+      void handleCartQuantityUpdate(line, nextQuantity);
+    });
+
+    dialog.addEventListener('change', function (e) {
+      const qtyInput = e.target.closest('[data-cod-qty-input]');
+      if (!qtyInput || isCartQuantityUpdateInFlight) return;
+
+      const line = qtyInput.getAttribute('data-cod-line');
+      const previousQuantity = Number(qtyInput.getAttribute('data-cod-quantity') || 1);
+      const nextQuantity = Number(qtyInput.value);
+
+      if (!Number.isInteger(nextQuantity) || nextQuantity < 1) {
+        qtyInput.value = String(previousQuantity);
+        return;
+      }
+
+      if (nextQuantity === previousQuantity) {
+        return;
+      }
+
+      void handleCartQuantityUpdate(line, nextQuantity);
+    });
+
+    dialog.addEventListener('keydown', function (e) {
+      const qtyInput = e.target.closest('[data-cod-qty-input]');
+      if (!qtyInput || e.key !== 'Enter') return;
+
+      e.preventDefault();
+      qtyInput.blur();
+    });
+
+    document.getElementById('cod-wilaya').addEventListener('change', async function () {
+      await renderCityOptions();
+      renderShippingMethods('home');
+      renderCart();
+    });
+
+    document.getElementById('cod-city').addEventListener('change', function () {
+      renderShippingMethods('home');
+      renderCart();
+    });
+
+    document.getElementById('cod-confirm').addEventListener('click', async function () {
+      const btn = this;
+      if (btn.dataset.loading === '1') return;
+      btn.dataset.loading = '1';
+
+      const fields = {
+        firstName: document.getElementById('cod-firstName').value.trim(),
+        lastName: document.getElementById('cod-lastName').value.trim(),
+        phone: document.getElementById('cod-phone').value.trim(),
+        email: document.getElementById('cod-email').value.trim(),
+        address: document.getElementById('cod-address').value.trim(),
+        city: document.getElementById('cod-city').value.trim(),
+        wilaya: document.getElementById('cod-wilaya').value,
+      };
+      const customerNote = document.getElementById('cod-note').value.trim();
+
+      const requiredFields = {
+        firstName: fields.firstName,
+        lastName: fields.lastName,
+        phone: fields.phone,
+        address: fields.address,
+        city: fields.city,
+        wilaya: fields.wilaya
+      };
+
+      const emailInput = document.getElementById('cod-email');
+      if (fields.email && emailInput && !emailInput.checkValidity()) {
+        alert('Veuillez saisir un email valide.');
+        btn.dataset.loading = '0';
+        return;
+      }
+
+      const empty = Object.entries(requiredFields).find(([, v]) => !v);
+      if (empty) {
+        const map = {
+          firstName: 'Prénom',
+          lastName: 'Nom',
+          phone: 'Téléphone',
+          address: 'Adresse',
+          city: 'Ville',
+          wilaya: 'Wilaya'
+        };
+        alert(`Veuillez remplir le champ : ${map[empty[0]]}`);
+        btn.dataset.loading = '0';
+        return;
+      }
+
+      btn.disabled = true;
+      setCodSubmittingState(true);
+      btn.innerHTML = 'Création de la commande...';
+
+      try {
+        const cart = await fetch('/cart.js', {
+          headers: { Accept: 'application/json' }
+        }).then(r => r.json());
+
+        if (!cart.items || !cart.items.length) {
+          throw new Error('Panier vide');
+        }
+
+        const shippingMethod = getSelectedShippingMethod() || 'home';
+        const shippingOptions = getShippingOptions(fields.wilaya);
+        const activeShipping = shippingOptions.find(option => option.id === shippingMethod) || shippingOptions[0] || null;
+        const subtotal = moneyFromCents(cart.total_price || 0);
+        const shippingPrice = activeShipping ? Number(activeShipping.price.toFixed(2)) : 0;
+        const totalValue = Number((subtotal + shippingPrice).toFixed(2));
+        const tracking = {
+          ...buildMetaTrackingDetails(),
+          currency: cart.currency || 'DZD',
+          subtotal,
+          shippingPrice,
+          totalValue
+        };
+
+        const payload = {
+          customer: fields,
+          note: customerNote,
+          shipping: {
+            method: shippingMethod
+          },
+          tracking,
+          items: cart.items.map(item => ({
+            variant_id: item.variant_id,
+            product_id: item.product_id,
+            quantity: item.quantity,
+            price: moneyFromCents(item.final_price || item.price || 0),
+            title: item.product_title || '',
+            sku: item.sku || ''
+          }))
+        };
+
+        const res = await fetch('/apps/cod/create-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify(payload)
+        });
+
+        const raw = await res.text();
+        const contentType = res.headers.get('content-type') || '';
+        let result = null;
+
+        try {
+          result = raw ? JSON.parse(raw) : null;
+        } catch (parseError) {
+          console.error('[COD] invalid JSON response:', {
+            status: res.status,
+            statusText: res.statusText,
+            contentType,
+            body: raw,
+            parseError
+          });
+          throw new Error('Reponse invalide du serveur de commande');
+        }
+
+        if (!contentType.includes('application/json')) {
+          console.warn('[COD] unexpected response content-type:', {
+            status: res.status,
+            statusText: res.statusText,
+            contentType,
+            body: result || raw
+          });
+        }
+
+        if (!res.ok || !result || result.success !== true) {
+          console.error('[COD] order creation failed:', {
+            status: res.status,
+            statusText: res.statusText,
+            body: result || raw
+          });
+          
+          throw new Error(result?.error || 'Erreur lors de la création de la commande');
+        }
+
+        console.log('[COD] order created:', {
+          orderId: result.orderId,
+          orderName: result.orderName
+        });
+
+        try {
+          await trackMetaPurchaseEvent({
+            cart,
+            tracking,
+            orderId: result.orderId,
+            orderName: result.orderName
+          });
+        } catch (metaError) {
+          console.error('[COD] Meta browser Purchase event error:', metaError);
+        }
+
+        persistThankYouPageData({
+          orderName: result.orderName || '',
+          customer: {
+            firstName: fields.firstName,
+            lastName: fields.lastName,
+            email: fields.email,
+            phone: fields.phone,
+            address: fields.address,
+            city: fields.city,
+            wilaya: fields.wilaya
+          },
+          paymentMethodLabel: 'Paiement a la livraison',
+          shippingMethodLabel: activeShipping?.label || 'Livraison',
+          contactPhone: '+213 551 639 560',
+          storeUrl: window.location.origin,
+          subtotal,
+          shippingPrice,
+          totalValue,
+          currency: tracking.currency || 'DZD',
+          items: (cart.items || []).map(item => ({
+            title: item.product_title || '',
+            variantTitle: item.variant_title || '',
+            image: item.image || '',
+            quantity: Number(item.quantity) || 1,
+            linePrice: moneyFromCents(item.line_price || 0)
+          }))
+        });
+
+        const cartCleared = await clearCartAndVerify();
+
+        if (!cartCleared) {
+          throw new Error('Commande creee, mais le panier est toujours plein');
+        }
+
+        window.location.href = getThankYouUrl();
+      } catch (err) {
+        console.error('[COD]', err);
+        setCodSubmittingState(false);
+        alert(err.message || 'Impossible de créer la commande.');
+        btn.disabled = false;
+        btn.dataset.loading = '0';
+        btn.innerHTML = '✓ &nbsp;Confirmer la commande';
+      }
+    });
+
+    dialog.showModal();
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById('cod-panel')?.classList.add('cod-open');
+    }));
+
+    renderWilayaOptions();
+    renderCityOptions();
+    renderShippingMethods('home');
+    renderCart();
+  }
+
+  function injectCartDrawerButton() {
+    if (document.getElementById('cod-cart-btn')) return;
+
+    const checkoutSelectors = [
+      'cart-drawer button[name="checkout"]',
+      'cart-drawer input[name="checkout"]',
+      'cart-drawer a[href="/checkout"]',
+      '.cart-drawer button[name="checkout"]',
+      '.cart-drawer input[name="checkout"]',
+      '.cart-drawer a[href="/checkout"]',
+      '.drawer button[name="checkout"]',
+      '.drawer input[name="checkout"]',
+    ];
+
+    let original = null;
+    for (const sel of checkoutSelectors) {
+      original = document.querySelector(sel);
+      if (original) break;
+    }
+    if (!original) return;
+
+    original.style.display = 'none';
+
+    const btn = document.createElement('button');
+    btn.id = 'cod-cart-btn';
+    btn.type = 'button';
+    btn.className = original.className;
+    btn.textContent = 'Commander — Paiement à la livraison';
+
+    btn.style.cssText = `
+      display:block;
+      width:100%;
+      margin-top:8px;
+      padding:14px;
+      background:${COD_BUTTON_BACKGROUND};
+      color:${COD_BUTTON_TEXT};
+      border:none;
+      border-radius:8px;
+      font-size:15px;
+      font-weight:700;
+      cursor:pointer;
+      font-family:inherit;
+      text-align:center;
+    `;
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      void fetchCart()
+        .then(cart => trackMetaBrowserEvent('InitiateCheckout', buildCartMetaParams(cart)))
+        .catch(error => console.error('[COD] Meta InitiateCheckout tracking failed:', error));
+      tryCloseThemeCart();
+      setTimeout(openCodDrawer, 120);
+    });
+
+    original.parentNode.insertBefore(btn, original.nextSibling);
+  }
+
+  function injectProductButton() {
+    if (!window.location.pathname.startsWith('/products/')) return;
+    if (document.getElementById('cod-product-btn')) return;
+
+    const atcSelectors = [
+      'product-form button[type="submit"]',
+      'form[action*="/cart/add"] button[type="submit"]',
+      '.product-form__submit',
+      'button[name="add"]',
+    ];
+
+    let atcBtn = null;
+    for (const sel of atcSelectors) {
+      atcBtn = document.querySelector(sel);
+      if (atcBtn) break;
+    }
+    if (!atcBtn) return;
+
+    const form = document.querySelector(
+      'product-form form, form[action*="/cart/add"], .product-form form'
+    );
+
+    if (form && form.dataset.codMetaAtcBound !== '1') {
+      form.dataset.codMetaAtcBound = '1';
+      form.addEventListener('submit', function () {
+        void trackMetaBrowserEvent('AddToCart', buildAddToCartParamsFromForm(form));
+      });
+    }
+
+    const dpb = document.querySelector('.shopify-payment-button, [data-shopify="payment-button"]');
+    if (dpb) dpb.style.display = 'none';
+
+    const btn = document.createElement('button');
+    btn.id = 'cod-product-btn';
+    btn.type = 'button';
+    btn.textContent = 'Acheter maintenant';
+    btn.className = atcBtn.className;
+
+    btn.style.cssText = `
+      display:block;
+      width:100%;
+      margin-top:10px;
+      padding:14px;
+      background:${COD_BUTTON_BACKGROUND};
+      color:${COD_BUTTON_TEXT};
+      border:none;
+      border-radius:8px;
+      font-size:15px;
+      font-weight:700;
+      cursor:pointer;
+      font-family:inherit;
+      text-align:center;
+    `;
+
+    btn.addEventListener('click', async function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      btn.textContent = '...';
+      btn.disabled = true;
+
+      if (form) {
+        try {
+          const res = await fetch('/cart/add.js', {
+            method: 'POST',
+            headers: { Accept: 'application/json' },
+            body: new FormData(form),
+          });
+          if (!res.ok) throw new Error('add to cart failed');
+
+          const addedItem = await res.json();
+          await trackMetaBrowserEvent('AddToCart', buildAddToCartParamsFromItem(addedItem));
+
+          const updatedCart = await fetchCart();
+          await trackMetaBrowserEvent('InitiateCheckout', buildCartMetaParams(updatedCart));
+        } catch (err) {
+          console.error('[COD] add to cart error:', err);
+        }
+      }
+
+      btn.textContent = 'Acheter maintenant';
+      btn.disabled = false;
+
+      openCodDrawer();
+    });
+
+    atcBtn.parentNode.insertBefore(btn, atcBtn.nextSibling);
+  }
+
+  let observerDebounce = null;
+
+  const observer = new MutationObserver(function () {
+    clearTimeout(observerDebounce);
+    observerDebounce = setTimeout(function () {
+      injectCartDrawerButton();
+      injectProductButton();
+    }, 80);
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  function init() {
+    void ensureMetaPixelReady();
+    injectCartDrawerButton();
+    injectProductButton();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+
