@@ -394,6 +394,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const lineItems = items.map((item) => ({
       variantId: `gid://shopify/ProductVariant/${item.variant_id}`,
       quantity: Number(item.quantity) || 1,
+      requiresShipping: true,
     }));
 
     const mutation = `#graphql
