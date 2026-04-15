@@ -10,7 +10,7 @@ import {
   getWilayaName,
   isCommuneInWilaya,
 } from "../data/algeria-locations";
-import { apiVersion, authenticate } from "../shopify.server";
+import { apiVersion, authenticate, unauthenticated } from "../shopify.server";
 
 type CodCustomer = {
   firstName?: string;
@@ -322,12 +322,24 @@ export async function action({ request }: ActionFunctionArgs) {
     console.log("COD ROUTE HIT");
 
     const { session } = await authenticate.public.appProxy(request);
+    const shop =
+      session?.shop || new URL(request.url).searchParams.get("shop") || "";
 
-    if (!session?.shop || !session.accessToken) {
+    if (!shop) {
       return codJson({
         success: false,
         code: "APP_PROXY_UNAUTHENTICATED",
         error: "App proxy non authentifie",
+      });
+    }
+
+    const { session: offlineSession } = await unauthenticated.admin(shop);
+
+    if (!offlineSession?.shop || !offlineSession?.accessToken) {
+      return codJson({
+        success: false,
+        code: "OFFLINE_SESSION_MISSING",
+        error: "Session boutique indisponible",
       });
     }
 
@@ -369,7 +381,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const shippingSettings = await getShippingSettingsByShop(session.shop);
+    const shippingSettings = await getShippingSettingsByShop(shop);
     const shippingOptions = getShippingOptionsForWilaya(
       shippingSettings,
       wilayaName,
@@ -448,7 +460,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     };
 
-    const result = await callAdminGraphQL(session, mutation, variables);
+    const result = await callAdminGraphQL(offlineSession, mutation, variables);
 
     console.log("ORDER CREATE RESULT:", JSON.stringify(result, null, 2));
 
@@ -490,7 +502,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     try {
-      const metaSettings = await getMetaSettingsByShop(session.shop);
+      const metaSettings = await getMetaSettingsByShop(shop);
 
       if (
         metaSettings.metaEnabled &&
@@ -501,7 +513,7 @@ export async function action({ request }: ActionFunctionArgs) {
           pixelId: metaSettings.metaPixelId,
           accessToken: metaSettings.metaConversionsApiToken,
           testEventCode: metaSettings.metaTestEventCode,
-          shop: session.shop,
+          shop,
           customer: {
             email: customer.email || "",
             phone: customer.phone || "",
