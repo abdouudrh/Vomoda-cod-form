@@ -15,14 +15,16 @@ function proxyJson(payload: Record<string, unknown>) {
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { session } = await authenticate.public.appProxy(request);
+    const shop =
+      session?.shop || new URL(request.url).searchParams.get("shop") || "";
 
-    if (!session?.shop) {
+    if (!shop) {
       throw new Error("APP_PROXY_UNAUTHENTICATED");
     }
 
     const [metaSettings, shippingFees] = await Promise.all([
-      getMetaSettingsByShop(session.shop),
-      getShippingSettingsByShop(session.shop),
+      getMetaSettingsByShop(shop),
+      getShippingSettingsByShop(shop),
     ]);
 
     return proxyJson({

@@ -195,12 +195,95 @@
       .toLowerCase();
   }
 
-  function emptyCodSettings() {
+  const COD_SETTINGS_CACHE_KEY = 'codSettingsCacheV1';
+  const COD_LOCATIONS_CACHE_KEY = 'codLocationDataV1';
+
+  function emptyCodSettings(isReady = false) {
     return {
       metaEnabled: false,
       metaPixelId: '',
-      shippingFees: {}
+      shippingFees: {},
+      shippingFeesReady: isReady
     };
+  }
+
+  function safeJsonParse(value) {
+    if (!value) return null;
+
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function readCachedMetaSettings() {
+    let cached = null;
+
+    try {
+      cached = safeJsonParse(window.localStorage.getItem(COD_SETTINGS_CACHE_KEY));
+    } catch (error) {
+      return null;
+    }
+
+    if (!cached || typeof cached !== 'object' || !cached.settings) {
+      return null;
+    }
+
+    const settings = cached.settings;
+
+    return {
+      metaEnabled: Boolean(settings.metaEnabled),
+      metaPixelId: String(settings.metaPixelId || '').trim(),
+      shippingFees: settings.shippingFees && typeof settings.shippingFees === 'object'
+        ? settings.shippingFees
+        : {},
+      shippingFeesReady: true
+    };
+  }
+
+  function persistCachedMetaSettings(settings) {
+    try {
+      window.localStorage.setItem(COD_SETTINGS_CACHE_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        settings: {
+          metaEnabled: Boolean(settings.metaEnabled),
+          metaPixelId: String(settings.metaPixelId || '').trim(),
+          shippingFees: settings.shippingFees && typeof settings.shippingFees === 'object'
+            ? settings.shippingFees
+            : {}
+        }
+      }));
+    } catch (error) {
+      console.error('[COD] failed to persist cached settings:', error);
+    }
+  }
+
+  function readCachedLocationData() {
+    let cached = null;
+
+    try {
+      cached = safeJsonParse(window.localStorage.getItem(COD_LOCATIONS_CACHE_KEY));
+    } catch (error) {
+      return null;
+    }
+
+    if (!cached || typeof cached !== 'object' || !cached.locations || typeof cached.locations !== 'object') {
+      return null;
+    }
+
+    return cached.locations;
+  }
+
+  function persistCachedLocationData(locations) {
+    try {
+      window.localStorage.setItem(COD_LOCATIONS_CACHE_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        locations
+      }));
+    } catch (error) {
+      console.error('[COD] failed to persist cached locations:', error);
+    }
   }
 
   function normalizeOptionalShippingFee(value) {
@@ -294,11 +377,22 @@
   let metaSettingsPromise = null;
   let metaPixelScriptPromise = null;
 
-  async function getMetaSettings() {
-    if (window.__codMetaSettings) {
-      return window.__codMetaSettings;
+  function buildMetaSettingsPayload(result) {
+    if (result?.success !== true || !result?.settings) {
+      throw new Error('SETTINGS_UNAVAILABLE');
     }
 
+    return {
+      metaEnabled: Boolean(result.settings.metaEnabled),
+      metaPixelId: String(result.settings.metaPixelId || '').trim(),
+      shippingFees: result.settings.shippingFees && typeof result.settings.shippingFees === 'object'
+        ? result.settings.shippingFees
+        : {},
+      shippingFeesReady: true
+    };
+  }
+
+  function refreshMetaSettings() {
     if (!metaSettingsPromise) {
       metaSettingsPromise = fetch('/apps/cod/settings', {
         headers: { Accept: 'application/json' },
@@ -317,29 +411,45 @@
               body: raw,
               error
             });
-            return emptyCodSettings();
+            throw new Error('INVALID_SETTINGS_RESPONSE');
           }
 
-          const settings = result?.success === true && result?.settings
-            ? {
-                metaEnabled: Boolean(result.settings.metaEnabled),
-                metaPixelId: String(result.settings.metaPixelId || '').trim(),
-                shippingFees: result.settings.shippingFees && typeof result.settings.shippingFees === 'object'
-                  ? result.settings.shippingFees
-                  : {}
-              }
-            : emptyCodSettings();
+          const settings = buildMetaSettingsPayload(result);
 
           window.__codMetaSettings = settings;
+          persistCachedMetaSettings(settings);
           return settings;
         })
         .catch(error => {
+          metaSettingsPromise = null;
           console.error('[COD] Meta settings loading failed:', error);
-          return emptyCodSettings();
+          return window.__codMetaSettings || readCachedMetaSettings() || emptyCodSettings(false);
         });
     }
 
     return metaSettingsPromise;
+  }
+
+  async function getMetaSettings() {
+    if (window.__codMetaSettings) {
+      if (!metaSettingsPromise) {
+        void refreshMetaSettings();
+      }
+
+      return window.__codMetaSettings;
+    }
+
+    const cachedSettings = readCachedMetaSettings();
+    if (cachedSettings) {
+      window.__codMetaSettings = cachedSettings;
+      if (!metaSettingsPromise) {
+        void refreshMetaSettings();
+      }
+
+      return cachedSettings;
+    }
+
+    return refreshMetaSettings();
   }
 
   function ensureFbqStub() {
@@ -558,11 +668,7 @@
     return matchedKey ? locations[matchedKey] : null;
   }
 
-  async function getLocationData() {
-    if (window.__codLocationData) {
-      return window.__codLocationData;
-    }
-
+  function refreshLocationData() {
     if (!locationDataPromise) {
       locationDataPromise = fetch('/apps/cod/locations', {
         headers: { Accept: 'application/json' },
@@ -594,15 +700,43 @@
           }
 
           window.__codLocationData = result.wilayas;
+          persistCachedLocationData(result.wilayas);
           return result.wilayas;
         })
         .catch(error => {
           locationDataPromise = null;
+          const cachedLocations = window.__codLocationData || readCachedLocationData();
+          if (cachedLocations) {
+            return cachedLocations;
+          }
+
           throw error;
         });
     }
 
     return locationDataPromise;
+  }
+
+  async function getLocationData() {
+    if (window.__codLocationData) {
+      if (!locationDataPromise) {
+        void refreshLocationData();
+      }
+
+      return window.__codLocationData;
+    }
+
+    const cachedLocations = readCachedLocationData();
+    if (cachedLocations) {
+      window.__codLocationData = cachedLocations;
+      if (!locationDataPromise) {
+        void refreshLocationData();
+      }
+
+      return cachedLocations;
+    }
+
+    return refreshLocationData();
   }
 
   async function renderWilayaOptions(preferredWilaya = '') {
@@ -1033,7 +1167,7 @@
       const subtotal = cart.total_price / 100;
       const selectedWilaya = document.getElementById('cod-wilaya')?.value || '';
       const hasDeliveryLocation = hasSelectedDeliveryLocation();
-      const shippingOptions = hasDeliveryLocation
+      const shippingOptions = hasDeliveryLocation && settings.shippingFeesReady
         ? getShippingOptions(settings.shippingFees || {}, selectedWilaya)
         : [];
       const selectedMethod = getSelectedShippingMethod();
@@ -1048,6 +1182,10 @@
         ${!hasDeliveryLocation ? `
           <div style="padding:10px 0 0;font-size:13px;color:#888;">
             Choisissez votre wilaya et commune pour afficher le prix de livraison.
+          </div>
+        ` : !settings.shippingFeesReady ? `
+          <div style="padding:10px 0 0;font-size:13px;color:#888;">
+            Chargement des frais de livraison...
           </div>
         ` : !activeShipping ? `
           <div style="padding:10px 0 0;font-size:13px;color:#888;">
@@ -1083,6 +1221,16 @@
     }
 
     const settings = await getMetaSettings();
+    if (!settings.shippingFeesReady) {
+      methodsEl.innerHTML = `
+        <div style="padding:12px 14px;border:1px solid #dbeafe;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:14px;line-height:1.5;">
+          Chargement des frais de livraison...
+        </div>
+      `;
+      methodsEl.style.display = 'block';
+      return;
+    }
+
     const options = getShippingOptions(settings.shippingFees || {}, wilaya);
     if (!options.length) {
       methodsEl.innerHTML = `
@@ -1717,6 +1865,8 @@
 
   function init() {
     void ensureMetaPixelReady();
+    void getLocationData().catch(error => console.error('[COD] background location preload failed:', error));
+    void getMetaSettings().catch(error => console.error('[COD] background settings preload failed:', error));
     injectCartDrawerButton();
     injectProductButton();
   }
