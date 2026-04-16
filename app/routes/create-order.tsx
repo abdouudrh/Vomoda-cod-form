@@ -10,7 +10,7 @@ import {
   getWilayaName,
   isCommuneInWilaya,
 } from "../data/algeria-locations";
-import { apiVersion, authenticate, unauthenticated } from "../shopify.server";
+import { authenticate } from "../shopify.server";
 
 type CodCustomer = {
   firstName?: string;
@@ -87,11 +87,6 @@ type OrderCreateResponse = {
     } | null;
   } | null;
   errors?: OrderCreateGraphQLError[];
-};
-
-type OfflineSessionLike = {
-  shop?: string;
-  accessToken?: string;
 };
 
 function codJson(payload: Record<string, unknown>) {
@@ -257,71 +252,11 @@ function buildOrderCustomAttributes(
   );
 }
 
-async function callAdminGraphQL(
-  session: OfflineSessionLike,
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<OrderCreateResponse> {
-  if (!session.shop || !session.accessToken) {
-    throw new Error("MISSING_OFFLINE_SESSION");
-  }
-
-  const endpoint = `https://${session.shop}/admin/api/${apiVersion}/graphql.json`;
-
-  let response: Response;
-
-  try {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Shopify-Access-Token": session.accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-  } catch (error) {
-    console.error("COD Admin API fetch failed:", {
-      endpoint,
-      shop: session.shop,
-      error,
-    });
-    throw new Error(
-      error instanceof Error ? error.message : "ADMIN_API_FETCH_FAILED",
-    );
-  }
-
-  const raw = await response.text();
-
-  if (!response.ok) {
-    console.error("COD Admin API non-OK response:", {
-      endpoint,
-      status: response.status,
-      statusText: response.statusText,
-      body: raw,
-    });
-    throw new Error(
-      `ADMIN_API_${response.status}_${response.statusText || "ERROR"}`,
-    );
-  }
-
-  try {
-    return (raw ? JSON.parse(raw) : {}) as OrderCreateResponse;
-  } catch (error) {
-    console.error("COD Admin API invalid JSON:", {
-      endpoint,
-      body: raw,
-      error,
-    });
-    throw new Error("INVALID_ADMIN_API_RESPONSE");
-  }
-}
-
 export async function action({ request }: ActionFunctionArgs) {
   try {
     console.log("COD ROUTE HIT");
 
-    const { session } = await authenticate.public.appProxy(request);
+    const { session, admin } = await authenticate.public.appProxy(request);
     const shop =
       session?.shop || new URL(request.url).searchParams.get("shop") || "";
 
@@ -333,12 +268,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const { session: offlineSession } = await unauthenticated.admin(shop);
-
-    if (!offlineSession?.shop || !offlineSession?.accessToken) {
+    if (!admin) {
       return codJson({
         success: false,
-        code: "OFFLINE_SESSION_MISSING",
+        code: "APP_PROXY_ADMIN_UNAVAILABLE",
         error: "Session boutique indisponible",
       });
     }
@@ -460,7 +393,20 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     };
 
-    const result = await callAdminGraphQL(offlineSession, mutation, variables);
+    let result: OrderCreateResponse;
+
+    try {
+      const response = await admin.graphql(mutation, { variables });
+      result = (await response.json()) as OrderCreateResponse;
+    } catch (error) {
+      console.error("COD Admin API fetch failed:", {
+        shop,
+        error,
+      });
+      throw new Error(
+        error instanceof Error ? error.message : "ADMIN_API_FETCH_FAILED",
+      );
+    }
 
     console.log("ORDER CREATE RESULT:", JSON.stringify(result, null, 2));
 
