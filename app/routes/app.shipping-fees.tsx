@@ -8,6 +8,7 @@ import {
   getShippingSettingsByShop,
   upsertShippingSettingsForShop,
 } from "../models/shipping-settings.server";
+import { syncShopAccessFromSession } from "../models/shop-access.server";
 import { authenticate } from "../shopify.server";
 
 type ShippingRow = {
@@ -76,6 +77,7 @@ function rowsToPayload(rows: ShippingRow[]) {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  await syncShopAccessFromSession(session);
   const shippingFees = await getShippingSettingsByShop(session.shop);
 
   return {
@@ -86,6 +88,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  await syncShopAccessFromSession(session);
   const formData = await request.formData();
   const rawJson = String(formData.get("shippingFeesJson") || "").trim();
 

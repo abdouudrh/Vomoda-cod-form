@@ -1,5 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { getMetaSettingsByShop } from "../models/meta-settings.server";
+import { getShopAccessTokenByShop } from "../models/shop-access.server";
 import {
   getShippingOptionsForWilaya,
   getShippingSettingsByShop,
@@ -119,6 +120,10 @@ async function parseCodRequest(request: Request): Promise<CodRequestBody> {
 
 function getTrimmedString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeShop(value: unknown) {
+  return getTrimmedString(value).toLowerCase();
 }
 
 function truncateValue(value: string, maxLength = 255) {
@@ -322,8 +327,9 @@ export async function action({ request }: ActionFunctionArgs) {
     console.log("COD ROUTE HIT");
 
     const { session } = await authenticate.public.appProxy(request);
-    const shop =
-      session?.shop || new URL(request.url).searchParams.get("shop") || "";
+    const shop = normalizeShop(
+      session?.shop || new URL(request.url).searchParams.get("shop") || "",
+    );
 
     if (!shop) {
       return codJson({
@@ -333,7 +339,22 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!session?.shop || !session?.accessToken) {
+    const fallbackAccessToken = session?.accessToken
+      ? ""
+      : await getShopAccessTokenByShop(shop);
+    const adminSession = session?.shop && session?.accessToken
+      ? {
+          shop: normalizeShop(session.shop),
+          accessToken: session.accessToken,
+        }
+      : fallbackAccessToken
+        ? {
+            shop,
+            accessToken: fallbackAccessToken,
+          }
+        : null;
+
+    if (!adminSession?.shop || !adminSession?.accessToken) {
       return codJson({
         success: false,
         code: "APP_PROXY_SESSION_UNAVAILABLE",
@@ -458,7 +479,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     };
 
-    const result = await callAdminGraphQL(session, mutation, variables);
+    const result = await callAdminGraphQL(adminSession, mutation, variables);
 
     console.log("ORDER CREATE RESULT:", JSON.stringify(result, null, 2));
 

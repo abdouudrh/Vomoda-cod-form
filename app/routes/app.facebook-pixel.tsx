@@ -7,6 +7,7 @@ import {
   getMetaSettingsByShop,
   upsertMetaSettingsForShop,
 } from "../models/meta-settings.server";
+import { syncShopAccessFromSession } from "../models/shop-access.server";
 import { authenticate } from "../shopify.server";
 
 type ActionData = {
@@ -17,6 +18,7 @@ type ActionData = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  await syncShopAccessFromSession(session);
   const settings = await getMetaSettingsByShop(session.shop);
 
   return {
@@ -27,6 +29,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  await syncShopAccessFromSession(session);
   const formData = await request.formData();
 
   const values = {
