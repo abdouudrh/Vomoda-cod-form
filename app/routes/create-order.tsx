@@ -475,7 +475,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       options: {
         inventoryBehaviour: "DECREMENT_OBEYING_POLICY",
-        sendReceipt: false,
+        sendReceipt: true,
         sendFulfillmentReceipt: false,
       },
     };
