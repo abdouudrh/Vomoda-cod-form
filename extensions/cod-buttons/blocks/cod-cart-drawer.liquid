@@ -184,6 +184,16 @@
 
   const COD_BUTTON_BACKGROUND = '#ff6a1a';
   const COD_BUTTON_TEXT = '#fff';
+  const COD_PRODUCT_VARIANTS = {% if product != blank %}{
+    {% for variant in product.variants %}
+      "{{ variant.id }}": {
+        available: {{ variant.available | json }},
+        inventoryQuantity: {{ variant.inventory_quantity | json }},
+        inventoryManagement: {{ variant.inventory_management | json }},
+        inventoryPolicy: {{ variant.inventory_policy | json }}
+      }{% unless forloop.last %},{% endunless %}
+    {% endfor %}
+  }{% else %}{}{% endif %};
 
   function normalizeWilayaName(value) {
     return (value || '')
@@ -1761,6 +1771,84 @@
       );
     }
 
+    function normalizeButtonText(value) {
+      return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function getSelectedVariantId(formEl) {
+      const formData = formEl ? new FormData(formEl) : null;
+      const formVariantId = String(formData?.get('id') || formData?.get('variant_id') || '').trim();
+      if (formVariantId) return formVariantId;
+
+      const urlVariantId = new URL(window.location.href).searchParams.get('variant');
+      if (urlVariantId) return String(urlVariantId).trim();
+
+      const variantInput = document.querySelector('[name="id"], [name="variant_id"], [data-variant-id]');
+      return String(
+        variantInput?.value ||
+        variantInput?.getAttribute('value') ||
+        variantInput?.getAttribute('data-variant-id') ||
+        ''
+      ).trim();
+    }
+
+    function isAtcSoldOut(button) {
+      if (!button) return false;
+
+      const buttonText = normalizeButtonText(button.textContent);
+      return (
+        button.disabled ||
+        button.getAttribute('aria-disabled') === 'true' ||
+        button.classList.contains('disabled') ||
+        buttonText.includes('epuise') ||
+        buttonText.includes('sold out') ||
+        buttonText.includes('rupture') ||
+        buttonText.includes('indisponible') ||
+        buttonText.includes('unavailable')
+      );
+    }
+
+    function isSelectedVariantSoldOut(formEl, button) {
+      const variantId = getSelectedVariantId(formEl);
+      const variant = variantId ? COD_PRODUCT_VARIANTS[variantId] : null;
+
+      if (variant && variant.available === false) {
+        return true;
+      }
+
+      return isAtcSoldOut(button);
+    }
+
+    function hideNativeBuyNowButtons(button) {
+      const productContainer =
+        button?.closest('product-form') ||
+        button?.closest('form') ||
+        button?.closest('.product-single__form') ||
+        button?.closest('.product-form') ||
+        button?.parentElement;
+
+      const scope = productContainer || document;
+      scope
+        .querySelectorAll('.shopify-payment-button, [data-shopify="payment-button"], button, a')
+        .forEach(function (candidate) {
+          if (candidate.id === 'cod-product-btn' || candidate === button) return;
+
+          const text = normalizeButtonText(candidate.textContent);
+          if (
+            candidate.matches('.shopify-payment-button, [data-shopify="payment-button"]') ||
+            text.includes('acheter maintenant') ||
+            text.includes('buy now')
+          ) {
+            candidate.style.display = 'none';
+          }
+        });
+    }
+
     let atcBtn = null;
     for (const sel of atcSelectors) {
       const matches = Array.from(document.querySelectorAll(sel));
@@ -1769,17 +1857,32 @@
     }
     if (!atcBtn) return;
 
+    const form =
+      atcBtn.closest('form') ||
+      document.querySelector('product-form form, form[action*="/cart/add"], .product-form form');
+
+    hideNativeBuyNowButtons(atcBtn);
+
+    const shouldHideCodButton = isSelectedVariantSoldOut(form, atcBtn);
+
     const existingBtn = document.getElementById('cod-product-btn');
     if (existingBtn) {
       const sameContainer = existingBtn.parentNode === atcBtn.parentNode;
       const samePosition = existingBtn.previousElementSibling === atcBtn;
-      if (sameContainer && samePosition && isVisible(existingBtn)) return;
+      if (sameContainer && samePosition) {
+        if (shouldHideCodButton) {
+          existingBtn.style.display = 'none';
+          existingBtn.disabled = true;
+          existingBtn.setAttribute('aria-hidden', 'true');
+        } else {
+          existingBtn.style.display = 'block';
+          existingBtn.disabled = false;
+          existingBtn.removeAttribute('aria-hidden');
+        }
+        return;
+      }
       existingBtn.remove();
     }
-
-    const form =
-      atcBtn.closest('form') ||
-      document.querySelector('product-form form, form[action*="/cart/add"], .product-form form');
 
     if (form && form.dataset.codMetaAtcBound !== '1') {
       form.dataset.codMetaAtcBound = '1';
@@ -1816,9 +1919,22 @@
       text-align:center;
     `;
 
+    if (shouldHideCodButton) {
+      btn.style.display = 'none';
+      btn.disabled = true;
+      btn.setAttribute('aria-hidden', 'true');
+    }
+
     btn.addEventListener('click', async function (e) {
       e.preventDefault();
       e.stopPropagation();
+
+      if (isSelectedVariantSoldOut(form, atcBtn)) {
+        btn.style.display = 'none';
+        btn.disabled = true;
+        btn.setAttribute('aria-hidden', 'true');
+        return;
+      }
 
       btn.textContent = '...';
       btn.disabled = true;
@@ -1849,6 +1965,16 @@
     });
 
     atcBtn.parentNode.insertBefore(btn, atcBtn.nextSibling);
+
+    if (form && form.dataset.codStockBound !== '1') {
+      form.dataset.codStockBound = '1';
+      form.addEventListener('change', function () {
+        setTimeout(injectProductButton, 30);
+      });
+      form.addEventListener('input', function () {
+        setTimeout(injectProductButton, 30);
+      });
+    }
   }
 
   let observerDebounce = null;
