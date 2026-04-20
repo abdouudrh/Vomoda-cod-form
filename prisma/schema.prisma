@@ -9,8 +9,8 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -31,14 +31,30 @@ model Session {
   emailVerified Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+
+  @@index([shop])
 }
 
 model MetaSettings {
-  shop                String   @id
-  metaEnabled         Boolean  @default(false)
-  metaPixelId         String?
+  shop                     String   @id
+  metaEnabled              Boolean  @default(false)
+  metaPixelId              String?
   metaConversionsApiToken String?
-  metaTestEventCode   String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  metaTestEventCode        String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model ShippingSettings {
+  shop      String   @id
+  feesJson  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ShopAccess {
+  shop        String   @id
+  accessToken String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

@@ -20,25 +20,6 @@ export type ShippingOption = {
   price: number;
 };
 
-let ensureShippingSettingsTablePromise: Promise<void> | null = null;
-
-async function ensureShippingSettingsTable() {
-  if (!ensureShippingSettingsTablePromise) {
-    ensureShippingSettingsTablePromise = prisma
-      .$executeRawUnsafe(`
-        CREATE TABLE IF NOT EXISTS "ShippingSettings" (
-          "shop" TEXT NOT NULL PRIMARY KEY,
-          "feesJson" TEXT NOT NULL,
-          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-      `)
-      .then(() => undefined);
-  }
-
-  return ensureShippingSettingsTablePromise;
-}
-
 function parseShippingFeesJson(raw: string | null) {
   if (!raw) {
     return cloneDefaultShippingFees();
@@ -53,50 +34,36 @@ function parseShippingFeesJson(raw: string | null) {
 }
 
 export async function getShippingSettingsByShop(shop: string) {
-  await ensureShippingSettingsTable();
+  const row = (await prisma.shippingSettings.findUnique({
+    where: { shop },
+    select: {
+      shop: true,
+      feesJson: true,
+    },
+  })) as ShippingSettingsRow | null;
 
-  const rows = await prisma.$queryRawUnsafe<ShippingSettingsRow[]>(
-    `
-      SELECT
-        "shop",
-        "feesJson"
-      FROM "ShippingSettings"
-      WHERE "shop" = ?
-      LIMIT 1
-    `,
-    shop,
-  );
-
-  return parseShippingFeesJson(rows[0]?.feesJson ?? null);
+  return parseShippingFeesJson(row?.feesJson ?? null);
 }
 
 export async function upsertShippingSettingsForShop(
   shop: string,
   shippingFees: ShippingFeesMap,
 ) {
-  await ensureShippingSettingsTable();
-
   const normalized = normalizeShippingFeesMap(
     shippingFees,
     cloneDefaultShippingFees(),
   );
 
-  await prisma.$executeRawUnsafe(
-    `
-      INSERT INTO "ShippingSettings" (
-        "shop",
-        "feesJson",
-        "createdAt",
-        "updatedAt"
-      )
-      VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      ON CONFLICT("shop") DO UPDATE SET
-        "feesJson" = excluded."feesJson",
-        "updatedAt" = CURRENT_TIMESTAMP
-    `,
-    shop,
-    JSON.stringify(normalized),
-  );
+  await prisma.shippingSettings.upsert({
+    where: { shop },
+    update: {
+      feesJson: JSON.stringify(normalized),
+    },
+    create: {
+      shop,
+      feesJson: JSON.stringify(normalized),
+    },
+  });
 }
 
 function getShippingFeesForWilaya(
