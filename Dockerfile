@@ -22,10 +22,9 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/prisma ./prisma
-RUN npm run setup
 
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/app ./app
 COPY --from=builder /app/public ./public
 
-CMD ["npm", "run", "start"]
+CMD ["npm", "run", "docker-start"]
