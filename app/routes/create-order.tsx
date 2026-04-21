@@ -107,6 +107,19 @@ type DraftOrderCompleteResponse = AdminGraphQLResponse & {
   } | null;
 };
 
+type MetafieldsSetResponse = AdminGraphQLResponse & {
+  data?: {
+    metafieldsSet?: {
+      metafields?: Array<{
+        id?: string | null;
+        key?: string | null;
+        namespace?: string | null;
+      }> | null;
+      userErrors?: AdminGraphQLUserError[];
+    } | null;
+  } | null;
+};
+
 function codJson(payload: Record<string, unknown>) {
   return json(payload, {
     status: 200,
@@ -145,6 +158,38 @@ function normalizeShop(value: unknown) {
 
 function truncateValue(value: string, maxLength = 255) {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function normalizeAlgeriaPhoneNumber(value: unknown) {
+  const raw = getTrimmedString(value);
+
+  if (!raw) {
+    return "";
+  }
+
+  const digits = raw.replace(/\D/g, "");
+
+  if (!digits) {
+    return "";
+  }
+
+  if (digits.startsWith("00")) {
+    return `+${digits.slice(2)}`;
+  }
+
+  if (digits.startsWith("213")) {
+    return `+${digits}`;
+  }
+
+  if (digits.startsWith("0")) {
+    return `+213${digits.slice(1)}`;
+  }
+
+  if (digits.length === 9) {
+    return `+213${digits}`;
+  }
+
+  return raw.startsWith("+") ? `+${digits}` : digits;
 }
 
 function getNumberValue(value: unknown) {
@@ -202,71 +247,81 @@ function isProtectedOrderReadError(error: AdminGraphQLError) {
   );
 }
 
-function buildOrderCustomAttributes(request: Request, tracking: CodTracking) {
+function buildVisibleOrderAttributes({
+  request,
+  tracking,
+  customer,
+  customerCity,
+  normalizedPhone,
+  shippingTitle,
+  wilayaName,
+  wilayaCode,
+}: {
+  request: Request;
+  tracking: CodTracking;
+  customer: CodCustomer;
+  customerCity: string;
+  normalizedPhone: string;
+  shippingTitle: string;
+  wilayaName: string;
+  wilayaCode: number | string;
+}) {
+  const fullUrl =
+    toOptionalUrl(tracking.eventSourceUrl) ||
+    toOptionalUrl(request.headers.get("referer"));
+
   const attributes = [
     {
-      key: "meta_client_ip_address",
+      key: "Commune",
+      value: truncateValue(customerCity, 255),
+    },
+    {
+      key: "full_url",
+      value: truncateValue(fullUrl, 500),
+    },
+    {
+      key: "App",
+      value: "Vomoda COD Form",
+    },
+    {
+      key: "Delivery",
+      value: truncateValue(shippingTitle, 255),
+    },
+    {
+      key: "IP Address",
       value: truncateValue(getClientIpAddress(request), 64),
     },
     {
-      key: "meta_client_user_agent",
-      value: truncateValue(
-        getTrimmedString(request.headers.get("user-agent")) ||
-          getTrimmedString(tracking.userAgent),
-        255,
-      ),
+      key: "Accepts Marketing",
+      value: "Yes",
     },
     {
-      key: "meta_event_id",
-      value: truncateValue(getTrimmedString(tracking.eventId), 128),
+      key: "Province",
+      value: truncateValue(wilayaName, 255),
     },
     {
-      key: "meta_fbp",
-      value: truncateValue(getTrimmedString(tracking.fbp), 255),
+      key: "Province Code",
+      value: String(wilayaCode).padStart(2, "0"),
     },
     {
-      key: "meta_fbc",
-      value: truncateValue(getTrimmedString(tracking.fbc), 255),
+      key: "Country",
+      value: "DZ",
     },
     {
-      key: "meta_fbclid",
-      value: truncateValue(getTrimmedString(tracking.fbclid), 255),
+      key: "First Name",
+      value: truncateValue(getTrimmedString(customer.firstName), 255),
     },
     {
-      key: "meta_event_source_url",
-      value: truncateValue(toOptionalUrl(tracking.eventSourceUrl), 500),
+      key: "Phone",
+      value: truncateValue(normalizedPhone, 64),
     },
     {
-      key: "meta_referrer",
-      value: truncateValue(
-        toOptionalUrl(tracking.referrer) ||
-          toOptionalUrl(request.headers.get("referer")),
-        500,
-      ),
+      key: "Address",
+      value: truncateValue(getTrimmedString(customer.address), 255),
     },
     {
-      key: "meta_browser_language",
-      value: truncateValue(getTrimmedString(tracking.language), 64),
-    },
-    {
-      key: "meta_utm_source",
-      value: truncateValue(getTrimmedString(tracking.utmSource), 255),
-    },
-    {
-      key: "meta_utm_medium",
-      value: truncateValue(getTrimmedString(tracking.utmMedium), 255),
-    },
-    {
-      key: "meta_utm_campaign",
-      value: truncateValue(getTrimmedString(tracking.utmCampaign), 255),
-    },
-    {
-      key: "meta_utm_content",
-      value: truncateValue(getTrimmedString(tracking.utmContent), 255),
-    },
-    {
-      key: "meta_utm_term",
-      value: truncateValue(getTrimmedString(tracking.utmTerm), 255),
+      key: "City",
+      value: truncateValue(customerCity, 255),
     },
   ];
 
@@ -274,6 +329,103 @@ function buildOrderCustomAttributes(request: Request, tracking: CodTracking) {
     (attribute): attribute is { key: string; value: string } =>
       Boolean(attribute.value),
   );
+}
+
+function buildOrderTrackingMetafields(
+  ownerId: string,
+  request: Request,
+  tracking: CodTracking,
+) {
+  const attributes = [
+    {
+      key: "client_ip_address",
+      type: "single_line_text_field",
+      value: truncateValue(getClientIpAddress(request), 64),
+    },
+    {
+      key: "client_user_agent",
+      type: "multi_line_text_field",
+      value: truncateValue(
+        getTrimmedString(request.headers.get("user-agent")) ||
+          getTrimmedString(tracking.userAgent),
+        1000,
+      ),
+    },
+    {
+      key: "event_id",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.eventId), 128),
+    },
+    {
+      key: "fbp",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.fbp), 255),
+    },
+    {
+      key: "fbc",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.fbc), 255),
+    },
+    {
+      key: "fbclid",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.fbclid), 255),
+    },
+    {
+      key: "event_source_url",
+      type: "multi_line_text_field",
+      value: truncateValue(toOptionalUrl(tracking.eventSourceUrl), 500),
+    },
+    {
+      key: "referrer",
+      type: "multi_line_text_field",
+      value: truncateValue(
+        toOptionalUrl(tracking.referrer) ||
+          toOptionalUrl(request.headers.get("referer")),
+        500,
+      ),
+    },
+    {
+      key: "browser_language",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.language), 64),
+    },
+    {
+      key: "utm_source",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.utmSource), 255),
+    },
+    {
+      key: "utm_medium",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.utmMedium), 255),
+    },
+    {
+      key: "utm_campaign",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.utmCampaign), 255),
+    },
+    {
+      key: "utm_content",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.utmContent), 255),
+    },
+    {
+      key: "utm_term",
+      type: "single_line_text_field",
+      value: truncateValue(getTrimmedString(tracking.utmTerm), 255),
+    },
+  ];
+
+  return attributes
+    .filter((attribute) => Boolean(attribute.value))
+    .map((attribute) => ({
+      namespace: "cod_tracking",
+      ownerId,
+      key: attribute.key,
+      type: attribute.type,
+      value: attribute.value,
+    }));
 }
 
 type OfflineSessionLike = {
@@ -341,6 +493,57 @@ async function callAdminGraphQL<TResponse extends AdminGraphQLResponse>(
   }
 }
 
+async function storeOrderTrackingMetafields({
+  session,
+  orderId,
+  request,
+  tracking,
+}: {
+  session: OfflineSessionLike;
+  orderId: string;
+  request: Request;
+  tracking: CodTracking;
+}) {
+  const metafields = buildOrderTrackingMetafields(orderId, request, tracking);
+
+  if (!metafields.length) {
+    return;
+  }
+
+  const mutation = `#graphql
+    mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields {
+          id
+          namespace
+          key
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const result = await callAdminGraphQL<MetafieldsSetResponse>(
+    session,
+    mutation,
+    {
+      metafields,
+    },
+  );
+  const graphQLErrors = result.errors ?? [];
+  const userErrors = result.data?.metafieldsSet?.userErrors ?? [];
+
+  if (graphQLErrors.length || userErrors.length) {
+    console.error("COD order tracking metafields error:", {
+      graphQLErrors,
+      userErrors,
+    });
+  }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   try {
     console.log("COD ROUTE HIT");
@@ -389,6 +592,7 @@ export async function action({ request }: ActionFunctionArgs) {
       typeof customer.wilaya === "string" ? customer.wilaya.trim() : "";
     const customerCity =
       typeof customer.city === "string" ? customer.city.trim() : "";
+    const normalizedPhone = normalizeAlgeriaPhoneNumber(customer.phone);
     const wilayaName = getWilayaName(customerWilaya);
     const wilayaData = getWilayaData(customerWilaya);
     const items = Array.isArray(body.items) ? body.items : [];
@@ -466,7 +670,16 @@ export async function action({ request }: ActionFunctionArgs) {
         lineItems,
         tags: ["COD", "Custom COD Form"],
         note: customerNote || "Commande COD creee via formulaire personnalise",
-        customAttributes: buildOrderCustomAttributes(request, tracking),
+        customAttributes: buildVisibleOrderAttributes({
+          request,
+          tracking,
+          customer,
+          customerCity,
+          normalizedPhone,
+          shippingTitle,
+          wilayaName,
+          wilayaCode: wilayaData.code,
+        }),
         ...(customer.email ? { email: customer.email } : {}),
         shippingLine: {
           title: `${shippingTitle} - ${wilayaName}`,
@@ -483,7 +696,7 @@ export async function action({ request }: ActionFunctionArgs) {
           province: wilayaName,
           zip: wilayaData.zip,
           countryCode: "DZ",
-          phone: customer.phone || "",
+          phone: normalizedPhone,
         },
         billingAddress: {
           firstName: customer.firstName || "",
@@ -493,7 +706,7 @@ export async function action({ request }: ActionFunctionArgs) {
           province: wilayaName,
           zip: wilayaData.zip,
           countryCode: "DZ",
-          phone: customer.phone || "",
+          phone: normalizedPhone,
         },
       },
     };
@@ -637,6 +850,22 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
+    if (createdOrder?.id) {
+      try {
+        await storeOrderTrackingMetafields({
+          session: adminSession,
+          orderId: createdOrder.id,
+          request,
+          tracking,
+        });
+      } catch (trackingMetafieldsError) {
+        console.error(
+          "COD order tracking metafields unexpected error:",
+          trackingMetafieldsError,
+        );
+      }
+    }
+
     try {
       const metaSettings = await getMetaSettingsByShop(shop);
 
@@ -652,7 +881,7 @@ export async function action({ request }: ActionFunctionArgs) {
           shop,
           customer: {
             email: customer.email || "",
-            phone: customer.phone || "",
+            phone: normalizedPhone || customer.phone || "",
             firstName: customer.firstName || "",
             lastName: customer.lastName || "",
             city: customerCity,
