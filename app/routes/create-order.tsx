@@ -64,7 +64,7 @@ type CodRequestBody = {
   tracking?: CodTracking;
 };
 
-type OrderCreateGraphQLError = {
+type AdminGraphQLError = {
   message?: string;
   path?: Array<string | number>;
   extensions?: {
@@ -72,22 +72,39 @@ type OrderCreateGraphQLError = {
   };
 };
 
-type OrderCreateUserError = {
+type AdminGraphQLUserError = {
   field?: string[];
   message: string;
 };
 
-type OrderCreateResponse = {
+type AdminGraphQLResponse = {
+  errors?: AdminGraphQLError[];
+};
+
+type DraftOrderCreateResponse = AdminGraphQLResponse & {
   data?: {
-    orderCreate?: {
-      order?: {
+    draftOrderCreate?: {
+      draftOrder?: {
         id?: string | null;
-        name?: string | null;
       } | null;
-      userErrors?: OrderCreateUserError[];
+      userErrors?: AdminGraphQLUserError[];
     } | null;
   } | null;
-  errors?: OrderCreateGraphQLError[];
+};
+
+type DraftOrderCompleteResponse = AdminGraphQLResponse & {
+  data?: {
+    draftOrderComplete?: {
+      draftOrder?: {
+        id?: string | null;
+        order?: {
+          id?: string | null;
+          name?: string | null;
+        } | null;
+      } | null;
+      userErrors?: AdminGraphQLUserError[];
+    } | null;
+  } | null;
 };
 
 function codJson(payload: Record<string, unknown>) {
@@ -171,19 +188,21 @@ function getClientIpAddress(request: Request) {
   return "";
 }
 
-function isProtectedOrderReadError(error: OrderCreateGraphQLError) {
+function isProtectedOrderReadError(error: AdminGraphQLError) {
   if (error.extensions?.code !== "ACCESS_DENIED") {
     return false;
   }
 
   const path = error.path ?? [];
-  return path[0] === "orderCreate" && path[1] === "order";
+  return (
+    (path[0] === "orderCreate" && path[1] === "order") ||
+    (path[0] === "draftOrderComplete" &&
+      path[1] === "draftOrder" &&
+      path[2] === "order")
+  );
 }
 
-function buildOrderCustomAttributes(
-  request: Request,
-  tracking: CodTracking,
-) {
+function buildOrderCustomAttributes(request: Request, tracking: CodTracking) {
   const attributes = [
     {
       key: "meta_client_ip_address",
@@ -262,11 +281,11 @@ type OfflineSessionLike = {
   accessToken?: string;
 };
 
-async function callAdminGraphQL(
+async function callAdminGraphQL<TResponse extends AdminGraphQLResponse>(
   session: OfflineSessionLike,
   query: string,
   variables: Record<string, unknown>,
-): Promise<OrderCreateResponse> {
+): Promise<TResponse> {
   if (!session.shop || !session.accessToken) {
     throw new Error("MISSING_APP_PROXY_SESSION");
   }
@@ -311,7 +330,7 @@ async function callAdminGraphQL(
   }
 
   try {
-    return (raw ? JSON.parse(raw) : {}) as OrderCreateResponse;
+    return (raw ? JSON.parse(raw) : {}) as TResponse;
   } catch (error) {
     console.error("COD Admin API invalid JSON:", {
       endpoint,
@@ -342,17 +361,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const fallbackAccessToken = session?.accessToken
       ? ""
       : await getShopAccessTokenByShop(shop);
-    const adminSession = session?.shop && session?.accessToken
-      ? {
-          shop: normalizeShop(session.shop),
-          accessToken: session.accessToken,
-        }
-      : fallbackAccessToken
+    const adminSession =
+      session?.shop && session?.accessToken
         ? {
-            shop,
-            accessToken: fallbackAccessToken,
+            shop: normalizeShop(session.shop),
+            accessToken: session.accessToken,
           }
-        : null;
+        : fallbackAccessToken
+          ? {
+              shop,
+              accessToken: fallbackAccessToken,
+            }
+          : null;
 
     if (!adminSession?.shop || !adminSession?.accessToken) {
       return codJson({
@@ -418,7 +438,6 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const shippingMethod = activeShipping.id;
     const shippingTitle = activeShipping.label;
     const shippingPrice = activeShipping.price;
 
@@ -428,12 +447,11 @@ export async function action({ request }: ActionFunctionArgs) {
       requiresShipping: true,
     }));
 
-    const mutation = `#graphql
-      mutation orderCreate($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
-        orderCreate(order: $order, options: $options) {
-          order {
+    const draftOrderCreateMutation = `#graphql
+      mutation draftOrderCreate($input: DraftOrderInput!) {
+        draftOrderCreate(input: $input) {
+          draftOrder {
             id
-            name
           }
           userErrors {
             field
@@ -443,25 +461,20 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
-    const variables = {
-      order: {
+    const draftOrderCreateVariables = {
+      input: {
         lineItems,
-        financialStatus: "PENDING",
         tags: ["COD", "Custom COD Form"],
         note: customerNote || "Commande COD creee via formulaire personnalise",
         customAttributes: buildOrderCustomAttributes(request, tracking),
         ...(customer.email ? { email: customer.email } : {}),
-        shippingLines: [
-          {
-            title: `${shippingTitle} - ${wilayaName}`,
-            priceSet: {
-              shopMoney: {
-                amount: shippingPrice.toFixed(2),
-                currencyCode: "DZD",
-              },
-            },
+        shippingLine: {
+          title: `${shippingTitle} - ${wilayaName}`,
+          priceWithCurrency: {
+            amount: shippingPrice.toFixed(2),
+            currencyCode: "DZD",
           },
-        ],
+        },
         shippingAddress: {
           firstName: customer.firstName || "",
           lastName: customer.lastName || "",
@@ -472,32 +485,123 @@ export async function action({ request }: ActionFunctionArgs) {
           countryCode: "DZ",
           phone: customer.phone || "",
         },
-      },
-      options: {
-        inventoryBehaviour: "DECREMENT_OBEYING_POLICY",
-        sendReceipt: true,
-        sendFulfillmentReceipt: false,
+        billingAddress: {
+          firstName: customer.firstName || "",
+          lastName: customer.lastName || "",
+          address1: customer.address || "",
+          city: customerCity,
+          province: wilayaName,
+          zip: wilayaData.zip,
+          countryCode: "DZ",
+          phone: customer.phone || "",
+        },
       },
     };
 
-    const result = await callAdminGraphQL(adminSession, mutation, variables);
+    const draftOrderCreateResult =
+      await callAdminGraphQL<DraftOrderCreateResponse>(
+        adminSession,
+        draftOrderCreateMutation,
+        draftOrderCreateVariables,
+      );
 
-    console.log("ORDER CREATE RESULT:", JSON.stringify(result, null, 2));
+    console.log(
+      "DRAFT ORDER CREATE RESULT:",
+      JSON.stringify(draftOrderCreateResult, null, 2),
+    );
 
-    const payload = result.data?.orderCreate;
-    const createdOrder = payload?.order ?? null;
-    const errors = payload?.userErrors ?? [];
-    const graphQLErrors = result.errors ?? [];
-    const blockingGraphQLErrors = graphQLErrors.filter(
+    const draftOrderCreatePayload =
+      draftOrderCreateResult.data?.draftOrderCreate;
+    const draftOrderCreateErrors = draftOrderCreatePayload?.userErrors ?? [];
+    const draftOrderCreateGraphQLErrors = draftOrderCreateResult.errors ?? [];
+
+    if (!draftOrderCreatePayload) {
+      return codJson({
+        success: false,
+        code: "DRAFT_ORDER_CREATE_NO_PAYLOAD",
+        error: "Aucune reponse de creation de brouillon de commande",
+        details: draftOrderCreateResult,
+      });
+    }
+
+    if (draftOrderCreateGraphQLErrors.length) {
+      return codJson({
+        success: false,
+        code: "GRAPHQL_ERROR",
+        error: draftOrderCreateGraphQLErrors
+          .map((e) => e.message || "Erreur GraphQL")
+          .join(" | "),
+        details: draftOrderCreateGraphQLErrors,
+      });
+    }
+
+    if (draftOrderCreateErrors.length) {
+      return codJson({
+        success: false,
+        code: "DRAFT_ORDER_CREATE_USER_ERROR",
+        error: draftOrderCreateErrors.map((e) => e.message).join(" | "),
+        details: draftOrderCreateErrors,
+      });
+    }
+
+    const draftOrderId = draftOrderCreatePayload.draftOrder?.id;
+
+    if (!draftOrderId) {
+      return codJson({
+        success: false,
+        code: "DRAFT_ORDER_CREATE_MISSING_ID",
+        error: "Brouillon de commande cree sans identifiant",
+        details: draftOrderCreateResult,
+      });
+    }
+
+    const draftOrderCompleteMutation = `#graphql
+      mutation draftOrderComplete($id: ID!) {
+        draftOrderComplete(id: $id, paymentPending: true) {
+          draftOrder {
+            id
+            order {
+              id
+              name
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const draftOrderCompleteResult =
+      await callAdminGraphQL<DraftOrderCompleteResponse>(
+        adminSession,
+        draftOrderCompleteMutation,
+        { id: draftOrderId },
+      );
+
+    console.log(
+      "DRAFT ORDER COMPLETE RESULT:",
+      JSON.stringify(draftOrderCompleteResult, null, 2),
+    );
+
+    const draftOrderCompletePayload =
+      draftOrderCompleteResult.data?.draftOrderComplete;
+    const createdOrder = draftOrderCompletePayload?.draftOrder?.order ?? null;
+    const draftOrderCompleteErrors =
+      draftOrderCompletePayload?.userErrors ?? [];
+    const draftOrderCompleteGraphQLErrors =
+      draftOrderCompleteResult.errors ?? [];
+    const blockingGraphQLErrors = draftOrderCompleteGraphQLErrors.filter(
       (error) => !isProtectedOrderReadError(error),
     );
 
-    if (!payload) {
+    if (!draftOrderCompletePayload) {
       return codJson({
         success: false,
-        code: "ORDER_CREATE_NO_PAYLOAD",
-        error: "Aucune reponse de creation de commande",
-        details: result,
+        code: "DRAFT_ORDER_COMPLETE_NO_PAYLOAD",
+        error: "Aucune reponse de finalisation de commande",
+        details: draftOrderCompleteResult,
       });
     }
 
@@ -512,12 +616,24 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (errors.length) {
+    if (draftOrderCompleteErrors.length) {
       return codJson({
         success: false,
-        code: "ORDER_CREATE_USER_ERROR",
-        error: errors.map((e) => e.message).join(" | "),
-        details: errors,
+        code: "DRAFT_ORDER_COMPLETE_USER_ERROR",
+        error: draftOrderCompleteErrors.map((e) => e.message).join(" | "),
+        details: draftOrderCompleteErrors,
+      });
+    }
+
+    if (
+      !createdOrder &&
+      !(draftOrderCompleteResult.errors ?? []).some(isProtectedOrderReadError)
+    ) {
+      return codJson({
+        success: false,
+        code: "DRAFT_ORDER_COMPLETE_MISSING_ORDER",
+        error: "Commande finalisee sans identifiant de commande",
+        details: draftOrderCompleteResult,
       });
     }
 
