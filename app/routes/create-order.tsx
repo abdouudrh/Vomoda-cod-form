@@ -120,6 +120,17 @@ type MetafieldsSetResponse = AdminGraphQLResponse & {
   } | null;
 };
 
+type CustomerSetResponse = AdminGraphQLResponse & {
+  data?: {
+    customerSet?: {
+      customer?: {
+        id?: string | null;
+      } | null;
+      userErrors?: AdminGraphQLUserError[];
+    } | null;
+  } | null;
+};
+
 function codJson(payload: Record<string, unknown>) {
   return json(payload, {
     status: 200,
@@ -493,6 +504,90 @@ async function callAdminGraphQL<TResponse extends AdminGraphQLResponse>(
   }
 }
 
+async function upsertCodCustomer({
+  session,
+  customer,
+  normalizedPhone,
+  customerCity,
+}: {
+  session: OfflineSessionLike;
+  customer: CodCustomer;
+  normalizedPhone: string;
+  customerCity: string;
+}) {
+  const email = getTrimmedString(customer.email);
+  const firstName = getTrimmedString(customer.firstName);
+  const lastName = getTrimmedString(customer.lastName);
+
+  if (!normalizedPhone && !email) {
+    throw new Error("CUSTOMER_CONTACT_REQUIRED");
+  }
+
+  const mutation = `#graphql
+    mutation customerSet($input: CustomerSetInput!, $identifier: CustomerSetIdentifiers) {
+      customerSet(input: $input, identifier: $identifier) {
+        customer {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const address = {
+    firstName,
+    lastName,
+    address1: getTrimmedString(customer.address),
+    city: customerCity,
+    countryCode: "DZ",
+    phone: normalizedPhone,
+  };
+  const input = {
+    firstName,
+    lastName,
+    ...(email ? { email } : {}),
+    ...(normalizedPhone ? { phone: normalizedPhone } : {}),
+    addresses: [address],
+    tags: ["COD", "Vomoda COD Form"],
+  };
+  const identifier = normalizedPhone ? { phone: normalizedPhone } : { email };
+  const result = await callAdminGraphQL<CustomerSetResponse>(
+    session,
+    mutation,
+    {
+      input,
+      identifier,
+    },
+  );
+  const payload = result.data?.customerSet;
+  const graphQLErrors = result.errors ?? [];
+  const userErrors = payload?.userErrors ?? [];
+
+  if (!payload || graphQLErrors.length || userErrors.length) {
+    console.error("COD customer upsert error:", {
+      graphQLErrors,
+      userErrors,
+      result,
+    });
+    throw new Error(
+      userErrors.map((error) => error.message).join(" | ") ||
+        graphQLErrors.map((error) => error.message).join(" | ") ||
+        "CUSTOMER_UPSERT_FAILED",
+    );
+  }
+
+  const customerId = payload.customer?.id;
+
+  if (!customerId) {
+    throw new Error("CUSTOMER_UPSERT_MISSING_ID");
+  }
+
+  return customerId;
+}
+
 async function storeOrderTrackingMetafields({
   session,
   orderId,
@@ -644,6 +739,29 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const shippingTitle = activeShipping.label;
     const shippingPrice = activeShipping.price;
+    let customerId = "";
+
+    try {
+      customerId = await upsertCodCustomer({
+        session: adminSession,
+        customer,
+        normalizedPhone,
+        customerCity,
+      });
+    } catch (customerError) {
+      console.error("COD customer link failed:", customerError);
+
+      return codJson({
+        success: false,
+        code: "CUSTOMER_LINK_FAILED",
+        error:
+          "Impossible de creer ou lier le client Shopify pour cette commande.",
+        details:
+          customerError instanceof Error
+            ? customerError.message
+            : "CUSTOMER_LINK_FAILED",
+      });
+    }
 
     const lineItems = items.map((item) => ({
       variantId: `gid://shopify/ProductVariant/${item.variant_id}`,
@@ -681,6 +799,10 @@ export async function action({ request }: ActionFunctionArgs) {
           wilayaCode: wilayaData.code,
         }),
         ...(customer.email ? { email: customer.email } : {}),
+        ...(normalizedPhone ? { phone: normalizedPhone } : {}),
+        purchasingEntity: {
+          customerId,
+        },
         shippingLine: {
           title: `${shippingTitle} - ${wilayaName}`,
           priceWithCurrency: {
