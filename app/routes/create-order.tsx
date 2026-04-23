@@ -203,6 +203,43 @@ function normalizeAlgeriaPhoneNumber(value: unknown) {
   return raw.startsWith("+") ? `+${digits}` : digits;
 }
 
+function getDeliveryCode(
+  shippingMethod: "home" | "stop_desk",
+  wilayaCode: string,
+) {
+  return `${shippingMethod === "stop_desk" ? "STOP" : "HOME"}_${wilayaCode}`;
+}
+
+function getOdooDeliveryServiceName(shippingTitle: string, wilayaName: string) {
+  return `${shippingTitle} - ${wilayaName}`;
+}
+
+function buildCodOrderNote({
+  customerNote,
+  deliveryCode,
+  odooDeliveryService,
+  shippingMethod,
+  wilayaCode,
+}: {
+  customerNote: string;
+  deliveryCode: string;
+  odooDeliveryService: string;
+  shippingMethod: "home" | "stop_desk";
+  wilayaCode: string;
+}) {
+  const baseNote =
+    customerNote || "Commande COD creee via formulaire personnalise";
+
+  return [
+    baseNote,
+    "",
+    `[COD_DELIVERY_CODE=${deliveryCode}]`,
+    `[COD_WILAYA_CODE=${wilayaCode}]`,
+    `[COD_SHIPPING_METHOD=${shippingMethod}]`,
+    `[COD_ODOO_SERVICE=${odooDeliveryService}]`,
+  ].join("\n");
+}
+
 function getNumberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -265,8 +302,10 @@ function buildVisibleOrderAttributes({
   customerCity,
   normalizedPhone,
   shippingTitle,
+  shippingMethod,
   wilayaName,
   wilayaCode,
+  odooDeliveryService,
 }: {
   request: Request;
   tracking: CodTracking;
@@ -274,8 +313,10 @@ function buildVisibleOrderAttributes({
   customerCity: string;
   normalizedPhone: string;
   shippingTitle: string;
+  shippingMethod: "home" | "stop_desk";
   wilayaName: string;
   wilayaCode: number | string;
+  odooDeliveryService: string;
 }) {
   const fullUrl =
     toOptionalUrl(tracking.eventSourceUrl) ||
@@ -297,6 +338,21 @@ function buildVisibleOrderAttributes({
     {
       key: "Delivery",
       value: truncateValue(shippingTitle, 255),
+    },
+    {
+      key: "Delivery Method Code",
+      value: shippingMethod,
+    },
+    {
+      key: "Delivery Code",
+      value: truncateValue(
+        getDeliveryCode(shippingMethod, String(wilayaCode).padStart(2, "0")),
+        64,
+      ),
+    },
+    {
+      key: "Odoo Delivery Service",
+      value: truncateValue(odooDeliveryService, 255),
     },
     {
       key: "IP Address",
@@ -746,6 +802,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const shippingTitle = activeShipping.label;
     const shippingPrice = activeShipping.price;
     const wilayaCode = String(wilayaData.code).padStart(2, "0");
+    const shippingMethod =
+      requestedShippingMethod === "stop_desk" ? "stop_desk" : "home";
+    const deliveryCode = getDeliveryCode(shippingMethod, wilayaCode);
+    const odooDeliveryService = getOdooDeliveryServiceName(
+      shippingTitle,
+      wilayaName,
+    );
     let customerId = "";
 
     try {
@@ -795,8 +858,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const draftOrderCreateVariables = {
       input: {
         lineItems,
-        tags: ["COD", "Custom COD Form"],
-        note: customerNote || "Commande COD creee via formulaire personnalise",
+        tags: ["COD", "Custom COD Form", `DELIVERY_${deliveryCode}`],
+        note: buildCodOrderNote({
+          customerNote,
+          deliveryCode,
+          odooDeliveryService,
+          shippingMethod,
+          wilayaCode,
+        }),
         customAttributes: buildVisibleOrderAttributes({
           request,
           tracking,
@@ -804,8 +873,10 @@ export async function action({ request }: ActionFunctionArgs) {
           customerCity,
           normalizedPhone,
           shippingTitle,
+          shippingMethod,
           wilayaName,
           wilayaCode: wilayaData.code,
+          odooDeliveryService,
         }),
         ...(customer.email ? { email: customer.email } : {}),
         ...(normalizedPhone ? { phone: normalizedPhone } : {}),
