@@ -509,11 +509,15 @@ async function upsertCodCustomer({
   customer,
   normalizedPhone,
   customerCity,
+  wilayaName,
+  wilayaCode,
 }: {
   session: OfflineSessionLike;
   customer: CodCustomer;
   normalizedPhone: string;
   customerCity: string;
+  wilayaName: string;
+  wilayaCode: string;
 }) {
   const email = getTrimmedString(customer.email);
   const firstName = getTrimmedString(customer.firstName);
@@ -543,6 +547,8 @@ async function upsertCodCustomer({
     address1: getTrimmedString(customer.address),
     city: customerCity,
     countryCode: "DZ",
+    province: wilayaName,
+    provinceCode: wilayaCode,
     phone: normalizedPhone,
   };
   const input = {
@@ -739,6 +745,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const shippingTitle = activeShipping.label;
     const shippingPrice = activeShipping.price;
+    const wilayaCode = String(wilayaData.code).padStart(2, "0");
     let customerId = "";
 
     try {
@@ -747,6 +754,8 @@ export async function action({ request }: ActionFunctionArgs) {
         customer,
         normalizedPhone,
         customerCity,
+        wilayaName,
+        wilayaCode,
       });
     } catch (customerError) {
       console.error("COD customer link failed:", customerError);
@@ -816,6 +825,7 @@ export async function action({ request }: ActionFunctionArgs) {
           address1: customer.address || "",
           city: customerCity,
           province: wilayaName,
+          provinceCode: wilayaCode,
           zip: wilayaData.zip,
           countryCode: "DZ",
           phone: normalizedPhone,
@@ -826,6 +836,7 @@ export async function action({ request }: ActionFunctionArgs) {
           address1: customer.address || "",
           city: customerCity,
           province: wilayaName,
+          provinceCode: wilayaCode,
           zip: wilayaData.zip,
           countryCode: "DZ",
           phone: normalizedPhone,
